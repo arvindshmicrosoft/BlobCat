@@ -124,6 +124,14 @@
                 // first we get the block list of the source blob. we use this to later parallelize the download / copy operation
                 var sourceBlockList = sourceBlob.DownloadBlockListAsync(BlockListingFilter.Committed, null, null, null).GetAwaiter().GetResult();
 
+                // in case the source blob is smaller then 256 MB (for latest API) then the blob is stored directly without any block list
+                // so in this case the sourceBlockList is 0-length and we need to fake a BlockListItem as null, which will later be handled below
+                if (sourceBlockList.Count() == 0 && sourceBlob.Properties.Length > 0)
+                {
+                    ListBlockItem fakeBlockItem = null;
+                    sourceBlockList = sourceBlockList.Concat(new[] { fakeBlockItem });
+                }
+
                 var blockRanges = new List<BlockRange>();
                 long currentOffset = 0;
 
@@ -131,21 +139,24 @@
                 int chunkIndex = 0;
                 foreach (var blockListItem in sourceBlockList)
                 {
+                    // handle special case when the sourceBlob was put using PutBlob and has no blocks
+                    var blockLength = blockListItem == null ? sourceBlob.Properties.Length : blockListItem.Length;
+
                     // compute a unique blockId based on blob account + container + blob name (includes path) + block length + block "number"
                     // TODO also include the endpoint when we generalize for all clouds
-                    var hashBasis = System.Text.Encoding.UTF8.GetBytes(string.Concat(sourceStorageAccountName, sourceStorageContainerName, sourceBlobName, blockListItem.Length, chunkIndex));
+                    var hashBasis = System.Text.Encoding.UTF8.GetBytes(string.Concat(sourceStorageAccountName, sourceStorageContainerName, sourceBlobName, blockLength, chunkIndex));
                     var newBlockId = Convert.ToBase64String(shaHasher.ComputeHash(hashBasis));
 
                     var newBlockRange = new BlockRange()
                     {
                         Name = newBlockId,
                         StartOffset = currentOffset,
-                        Length = blockListItem.Length
+                        Length = blockLength
                     };
 
                     // increment this here itself as we may potentially skip to the next blob
                     chunkIndex++;
-                    currentOffset += blockListItem.Length;
+                    currentOffset += blockLength;
 
                     // check if this block has already been copied + committed at the destination, and in that case, skip it
                     if (destBlockList.Contains(newBlockId))
