@@ -3,3 +3,8 @@
 ################################################################################
 
 /.vs
+/BlobCatCmd/bin/Debug/netcoreapp2.0
+/BlobCatCmd/obj
+/BlobCatEngine/obj
+/BlobCatEngine/bin/Debug/netstandard2.0
+/packages

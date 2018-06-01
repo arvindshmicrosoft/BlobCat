@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.27428.2015
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BlobCatCmd", "BlobCatCmd\BlobCatCmd.csproj", "{557C4673-B8BF-4ACF-8D83-C6EA135E1CED}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BlobCatEngine", "BlobCatEngine\BlobCatEngine.csproj", "{222617E9-40F0-44AA-A47D-A2D8447D0378}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{557C4673-B8BF-4ACF-8D83-C6EA135E1CED}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{557C4673-B8BF-4ACF-8D83-C6EA135E1CED}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{557C4673-B8BF-4ACF-8D83-C6EA135E1CED}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{557C4673-B8BF-4ACF-8D83-C6EA135E1CED}.Release|Any CPU.Build.0 = Release|Any CPU
+		{222617E9-40F0-44AA-A47D-A2D8447D0378}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{222617E9-40F0-44AA-A47D-A2D8447D0378}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{222617E9-40F0-44AA-A47D-A2D8447D0378}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{222617E9-40F0-44AA-A47D-A2D8447D0378}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {43343A15-7FC7-44C3-A260-B78001C45371}
+	EndGlobalSection
+EndGlobal
