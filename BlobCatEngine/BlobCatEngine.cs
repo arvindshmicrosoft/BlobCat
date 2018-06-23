@@ -186,10 +186,42 @@
                     // TODO do we really need this copy?
                     var sourceBlobLocalCopy = sourceBlob; // sourceContainer.GetBlockBlobReference(sourceBlobName);
 
-                    // TODO verify cast
+                    // There is an explicit cast to an int here. Given we are always dealing with blocks of block blobs, and each block by itself cannot exceed 100 MB, this case is safe in our case
                     using (var memStream = new MemoryStream((int)currRange.Length))
                     {
-                        sourceBlobLocalCopy.DownloadRangeToStreamAsync(memStream, currRange.StartOffset, currRange.Length).GetAwaiter().GetResult();
+                        int sleepDuration = 1000;
+
+                        while (true)
+                        {
+                            try
+                            {
+                                sourceBlobLocalCopy.DownloadRangeToStreamAsync(memStream, currRange.StartOffset, currRange.Length).GetAwaiter().GetResult();
+                            }
+                            catch (StorageException ex)
+                            {
+                                Debug.WriteLine($"Error received: {ex.Message} with Error code {ex.RequestInformation.ErrorCode}");
+
+                                foreach (var addDetails in ex.RequestInformation.ExtendedErrorInformation.AdditionalDetails)
+                                {
+                                    Debug.WriteLine($"{addDetails.Key}: {addDetails.Value}");
+                                }
+
+                                if ("ServerBusy" == ex.RequestInformation.ErrorCode || "InternalError" == ex.RequestInformation.ErrorCode || "OperationTimedOut" == ex.RequestInformation.ErrorCode)
+                                {
+                                    memStream.Position = 0;
+
+                                    System.Threading.Thread.Sleep(sleepDuration);
+                                    sleepDuration *= 2;
+                                    continue;
+                                }
+                                else
+                                {
+                                    throw;
+                                }
+                            }
+
+                            break;
+                        }
 
                         // compute the hash, for which we need to reset the memory stream
                         memStream.Position = 0;
@@ -200,7 +232,39 @@
 
                         Debug.WriteLine($"Putting block {currRange.Name}");
 
-                        destBlob.PutBlockAsync(currRange.Name, memStream, Convert.ToBase64String(md5Checksum)).GetAwaiter().GetResult();
+                        sleepDuration = 1000;
+
+                        while (true)
+                        {
+                            try
+                            {
+                                destBlob.PutBlockAsync(currRange.Name, memStream, Convert.ToBase64String(md5Checksum)).GetAwaiter().GetResult();
+                            }
+                            catch (StorageException ex)
+                            {
+                                Debug.WriteLine($"Error received: {ex.Message} with Error code {ex.RequestInformation.ErrorCode}");
+
+                                foreach (var addDetails in ex.RequestInformation.ExtendedErrorInformation.AdditionalDetails)
+                                {
+                                    Debug.WriteLine($"{addDetails.Key}: {addDetails.Value}");
+                                }
+
+                                if ("ServerBusy" == ex.RequestInformation.ErrorCode || "InternalError" == ex.RequestInformation.ErrorCode || "OperationTimedOut" == ex.RequestInformation.ErrorCode)
+                                {
+                                    memStream.Position = 0;
+
+                                    System.Threading.Thread.Sleep(sleepDuration);
+                                    sleepDuration *= 2;
+                                    continue;
+                                }
+                                else
+                                {
+                                    throw;
+                                }
+                            }
+
+                            break;
+                        }
                     }
 
                     return hasher;
@@ -211,9 +275,39 @@
                 // keep adding the blocks we just copied, to the final block list
                 finalBlockList.AddRange(from r in blockRanges select r.Name);
 
-                // TODO review this whether we put this for each source file or at the end of all source files
-                // when we are all done, execute a "commit" by using Put Block List operation
-                destBlob.PutBlockListAsync(finalBlockList).GetAwaiter().GetResult();
+                int sleepDurationFinal = 1000;
+
+                while (true)
+                {
+                    try
+                    {
+                        // TODO review this whether we put this for each source file or at the end of all source files
+                        // when we are all done, execute a "commit" by using Put Block List operation
+                        destBlob.PutBlockListAsync(finalBlockList).GetAwaiter().GetResult();
+                    }
+                    catch (StorageException ex)
+                    {
+                        Debug.WriteLine($"Error received: {ex.Message} with Error code {ex.RequestInformation.ErrorCode}");
+
+                        foreach (var addDetails in ex.RequestInformation.ExtendedErrorInformation.AdditionalDetails)
+                        {
+                            Debug.WriteLine($"{addDetails.Key}: {addDetails.Value}");
+                        }
+
+                        if ("ServerBusy" == ex.RequestInformation.ErrorCode || "InternalError" == ex.RequestInformation.ErrorCode || "OperationTimedOut" == ex.RequestInformation.ErrorCode)
+                        {
+                            System.Threading.Thread.Sleep(sleepDurationFinal);
+                            sleepDurationFinal *= 2;
+                            continue;
+                        }
+                        else
+                        {
+                            throw;
+                        }
+                    }
+
+                    break;
+                }
 
                 Debug.WriteLine($"{DateTime.Now}: END {sourceBlobName}");
 
@@ -374,7 +468,39 @@
 
                             Debug.WriteLine($"Putting block {currRange.Name}");
 
-                            destBlob.PutBlockAsync(currRange.Name, memStream, Convert.ToBase64String(md5Checksum)).GetAwaiter().GetResult();
+                            int sleepDuration = 1000;
+
+                            while (true)
+                            {
+                                try
+                                {
+                                    destBlob.PutBlockAsync(currRange.Name, memStream, Convert.ToBase64String(md5Checksum)).GetAwaiter().GetResult();
+                                }
+                                catch (StorageException ex)
+                                {
+                                    Debug.WriteLine($"Error received: {ex.Message} with Error code {ex.RequestInformation.ErrorCode}");
+
+                                    foreach (var addDetails in ex.RequestInformation.ExtendedErrorInformation.AdditionalDetails)
+                                    {
+                                        Debug.WriteLine($"{addDetails.Key}: {addDetails.Value}");
+                                    }
+
+                                    if ("ServerBusy" == ex.RequestInformation.ErrorCode || "InternalError" == ex.RequestInformation.ErrorCode || "OperationTimedOut" == ex.RequestInformation.ErrorCode)
+                                    {
+                                        memStream.Position = 0;
+
+                                        System.Threading.Thread.Sleep(sleepDuration);
+                                        sleepDuration *= 2;
+                                        continue;
+                                    }
+                                    else
+                                    {
+                                        throw;
+                                    }
+                                }
+
+                                break;
+                            }
                         }
                     }
 
@@ -389,9 +515,39 @@
                 // keep adding the blocks we just copied, to the final block list
                 finalBlockList.AddRange(from r in blockRanges select r.Name);
 
-                // TODO review this whether we put this for each source file or at the end of all source files
-                // when we are all done, execute a "commit" by using Put Block List operation
-                destBlob.PutBlockListAsync(finalBlockList).GetAwaiter().GetResult();
+                int sleepDurationFinal = 1000;
+
+                while (true)
+                {
+                    try
+                    {
+                        // TODO review this whether we put this for each source file or at the end of all source files
+                        // when we are all done, execute a "commit" by using Put Block List operation
+                        destBlob.PutBlockListAsync(finalBlockList).GetAwaiter().GetResult();
+                    }
+                    catch (StorageException ex)
+                    {
+                        Debug.WriteLine($"Error received: {ex.Message} with Error code {ex.RequestInformation.ErrorCode}");
+
+                        foreach (var addDetails in ex.RequestInformation.ExtendedErrorInformation.AdditionalDetails)
+                        {
+                            Debug.WriteLine($"{addDetails.Key}: {addDetails.Value}");
+                        }
+
+                        if ("ServerBusy" == ex.RequestInformation.ErrorCode || "InternalError" == ex.RequestInformation.ErrorCode || "OperationTimedOut" == ex.RequestInformation.ErrorCode)
+                        {
+                            System.Threading.Thread.Sleep(sleepDurationFinal);
+                            sleepDurationFinal *= 2;
+                            continue;
+                        }
+                        else
+                        {
+                            throw;
+                        }
+                    }
+
+                    break;
+                }
 
                 Debug.WriteLine($"{DateTime.Now}: END {sourceFileName}");
 

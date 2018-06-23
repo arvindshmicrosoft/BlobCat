@@ -8,3 +8,7 @@
 /BlobCatEngine/obj
 /BlobCatEngine/bin/Debug/netstandard2.0
 /packages
+/BlobCatCmd/bin/Release
+/BlobCatCmd/BlobCatCmd.csproj.user
+/BlobCatCmd/Properties/PublishProfiles
+/BlobCatEngine/bin/Release/netstandard2.0
