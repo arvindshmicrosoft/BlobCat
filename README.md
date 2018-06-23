@@ -9,11 +9,12 @@ Use command line execution
 
 	dotnet blobcat.dll <verb> <options>
 
-<verb> is currently either of:
-*concatblob*: Concatenates a set of blobs into a single blob.
-*filestoblob*: Concatenates a set of on-disk files into a single blob.
+\<verb\> is currently either of the following:
 
-<options> vary for each verb, see sections below for details.
+* *concatblob*: Concatenates a set of blobs into a single blob.
+* *filestoblob*: Concatenates a set of on-disk files into a single blob.
+
+\<options\> vary for each verb, see sections below for details.
 
 ## Concatenate blob-to-blob syntax
 A sample command line (for the blob-to-blob scenario) is shown below. it concatenates any files beginning with the specified prefix in the specified Azure storage account and container, into the destination Azure storage account and container.
