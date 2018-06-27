@@ -34,32 +34,45 @@
         /// <param name="sourceStorageAccountName"></param>
         /// <param name="sourceStorageContainerName"></param>
         /// <param name="sourceStorageAccountKey"></param>
+        /// <param name="isSourceSAS"></param>
         /// <param name="sourceBlobPrefix"></param>
         /// <param name="sortBlobs"></param>
         /// <param name="sourceBlobNames"></param>
         /// <param name="destStorageAccountName"></param>
         /// <param name="destStorageAccountKey"></param>
+        /// <param name="isDestSAS"></param>
         /// <param name="destStorageContainerName"></param>
         /// <param name="destBlobName"></param>
+        /// <param name="colHeader"></param>
+        /// <returns></returns>
         public static bool BlobToBlob(string sourceStorageAccountName,
             string sourceStorageContainerName,
             string sourceStorageAccountKey,
+            string sourceSAS,
             string sourceBlobPrefix,
             bool sortBlobs,
             List<string> sourceBlobNames,
             string destStorageAccountName,
             string destStorageAccountKey,
+            string destSAS,
             string destStorageContainerName,
-            string destBlobName)
+            string destBlobName,
+            string colHeader)
         {
             // this will be used to compute a unique blockId for the source blocks
             var shaHasher = new SHA384Managed();
 
             GlobalOptimizations();
 
+            var typeOfSourceCredential = string.IsNullOrEmpty(sourceSAS) ? "AccountKey": "SharedAccessSignature";
+            var sourceCredential = string.IsNullOrEmpty(sourceSAS) ? sourceStorageAccountKey : sourceSAS;
+
+            var typeOfDestCredential = string.IsNullOrEmpty(destSAS) ? "AccountKey":"SharedAccessSignature";
+            var destCredential = string.IsNullOrEmpty(destSAS) ? destStorageAccountKey : destSAS;
+
             // TODO remove hard-coding of core.windows.net
-            string sourceAzureStorageConnStr = $"DefaultEndpointsProtocol=https;AccountName={sourceStorageAccountName};AccountKey={sourceStorageAccountKey};EndpointSuffix=core.windows.net";
-            string destAzureStorageConnStr = $"DefaultEndpointsProtocol=https;AccountName={destStorageAccountName};AccountKey={destStorageAccountKey};EndpointSuffix=core.windows.net";
+            string sourceAzureStorageConnStr = $"DefaultEndpointsProtocol=https;AccountName={sourceStorageAccountName};{typeOfSourceCredential}={sourceCredential};EndpointSuffix=core.windows.net";
+            string destAzureStorageConnStr = $"DefaultEndpointsProtocol=https;AccountName={destStorageAccountName};{typeOfDestCredential}={destCredential};EndpointSuffix=core.windows.net";
 
             var destStorageAccount = CloudStorageAccount.Parse(destAzureStorageConnStr);
             var destBlobClient = destStorageAccount.CreateCloudBlobClient();
@@ -331,8 +344,10 @@
         /// <param name="sourceFileNames"></param>
         /// <param name="destStorageAccountName"></param>
         /// <param name="destStorageAccountKey"></param>
+        /// <param name="destSAS"></param>
         /// <param name="destStorageContainerName"></param>
         /// <param name="destBlobName"></param>
+        /// <param name="colHeader"></param>
         /// <returns>
         /// True if successful; False if errors found
         /// </returns>
@@ -342,16 +357,21 @@
             List<string> sourceFileNames,
             string destStorageAccountName,
             string destStorageAccountKey,
+            string destSAS,
             string destStorageContainerName,
-            string destBlobName)
+            string destBlobName,
+            string colHeader)
         {
             GlobalOptimizations();
 
             // this will be used to compute a unique blockId for the blocks
             var shaHasher = new SHA384Managed();
 
+            var typeOfDestCredential = string.IsNullOrEmpty(destSAS) ? "AccountKey" : "SharedAccessSignature";
+            var destCredential = string.IsNullOrEmpty(destSAS) ? destStorageAccountKey : destSAS;
+
             // TODO remove hard-coding of core.windows.net
-            string destAzureStorageConnStr = $"DefaultEndpointsProtocol=https;AccountName={destStorageAccountName};AccountKey={destStorageAccountKey};EndpointSuffix=core.windows.net";
+            string destAzureStorageConnStr = $"DefaultEndpointsProtocol=https;AccountName={destStorageAccountName};{typeOfDestCredential}={destCredential};EndpointSuffix=core.windows.net";
 
             var destStorageAccount = CloudStorageAccount.Parse(destAzureStorageConnStr);
             var destBlobClient = destStorageAccount.CreateCloudBlobClient();

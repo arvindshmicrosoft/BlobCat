@@ -19,6 +19,9 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("SourceKey", Required = false, HelpText = "Source storage account key")]
         public string SourceKey { get; set; }
 
+        [Option("SourceSAS", Required = false, HelpText = "Source SAS")]
+        public string SourceSAS { get; set; }
+
         [Option("SourceFiles", Required = false, HelpText = "Source file name(s) - must include folder name(s) if applicable")]
         public IEnumerable<string> SourceFiles { get; set; }
 
@@ -37,8 +40,14 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("DestKey", Required = false, HelpText = "Destination storage account key")]
         public string DestKey { get; set; }
 
+        [Option("DestSAS", Required = false, HelpText = "Destination SAS")]
+        public string DestSAS { get; set; }
+
         [Option("DestFilename", Required = false, HelpText = "Destination file name")]
         public string DestFilename { get; set; }
+
+        [Option("ColHeader", Required = false, HelpText = "Column header string")]
+        public string ColHeader { get; set; }
     }
 
     [Verb("filestoblob", HelpText = "Concatenates a set of on-disk files into a single blob.")]
@@ -64,8 +73,14 @@ namespace Microsoft.Azure.Samples.BlobCat
 
         [Option("DestKey", Required = false, HelpText = "Destination storage account key")]
         public string DestKey { get; set; }
-        
+
+        [Option("DestSAS", Required = false, HelpText = "Destination SAS")]
+        public string DestSAS { get; set; }
+
         [Option("DestFilename", Required = false, HelpText = "Destination file name")]
         public string DestFilename { get; set; }
+
+        [Option("ColHeader", Required = false, HelpText = "Column header string")]
+        public string ColHeader { get; set; }
     }
 }

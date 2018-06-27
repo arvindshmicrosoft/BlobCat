@@ -18,17 +18,20 @@ namespace Microsoft.Azure.Samples.BlobCat
             var parseResult = CommandLine.Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args)
                 .MapResult(
                 (ConcatBlobOptions opts) => {
-                    return BlobCatEngine.BlobToBlob(
-                        opts.SourceAccountName,
-                        opts.SourceContainer,
-                        opts.SourceKey,
+                return BlobCatEngine.BlobToBlob(
+                    opts.SourceAccountName,
+                    opts.SourceContainer,
+                    opts.SourceKey,
+                    opts.SourceSAS,
                         opts.SourceFilePrefix,
                         opts.SortFilenames,
                         opts.SourceFiles.ToList(),
                         opts.DestAccountName,
                         opts.DestKey,
+                        opts.DestSAS,
                         opts.DestContainer,
-                        opts.DestFilename) ? 0 : 1;
+                        opts.DestFilename,
+                        opts.ColHeader) ? 0 : 1;
                 },
                 (FilesToBlobOptions opts) => 
                 {
@@ -39,8 +42,10 @@ namespace Microsoft.Azure.Samples.BlobCat
                         opts.SourceFiles.ToList(),
                         opts.DestAccountName,
                         opts.DestKey,
+                        opts.DestSAS,
                         opts.DestContainer,
-                        opts.DestFilename
+                        opts.DestFilename,
+                        opts.ColHeader
                         ) ? 0 : 1;
                 },
                 errs => 1);
