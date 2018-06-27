@@ -9,5 +9,6 @@ namespace Microsoft.Azure.Samples.BlobCat
         internal long StartOffset;
         internal long Length;
         internal string Name;
+        internal string StringToUse = null;
     }
 }

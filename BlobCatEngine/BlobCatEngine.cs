@@ -9,6 +9,8 @@
     using System.Linq;
     using System.Net;
     using System.Security.Cryptography;
+    using System.Text;
+    using System.Text.RegularExpressions;
     using System.Threading;
     using System.Threading.Tasks;
 
@@ -127,58 +129,96 @@
                 }
             }
 
-            // iterate through each source blob, one at a time.
-            foreach (var sourceBlobName in sourceBlobNames)
+            var sourceBlobItems = new List<BlobItem>();
+
+            // first, do we have a column header string specified, if so, prepend it to the list of "source blobs" 
+            // clearly denoting this has to be used as a string
+            if (!string.IsNullOrEmpty(colHeader))
             {
-                Debug.WriteLine($"{DateTime.Now}: START {sourceBlobName}");
-
-                var sourceBlob = sourceContainer.GetBlockBlobReference(sourceBlobName);
-
-                // first we get the block list of the source blob. we use this to later parallelize the download / copy operation
-                var sourceBlockList = sourceBlob.DownloadBlockListAsync(BlockListingFilter.Committed, null, null, null).GetAwaiter().GetResult();
-
-                // in case the source blob is smaller then 256 MB (for latest API) then the blob is stored directly without any block list
-                // so in this case the sourceBlockList is 0-length and we need to fake a BlockListItem as null, which will later be handled below
-                if (sourceBlockList.Count() == 0 && sourceBlob.Properties.Length > 0)
+                sourceBlobItems.Add(new BlobItem()
                 {
-                    ListBlockItem fakeBlockItem = null;
-                    sourceBlockList = sourceBlockList.Concat(new[] { fakeBlockItem });
-                }
+                    sourceBlobName = colHeader,
+                    useAsString = true
+                });
+            }
 
+            // now copy in the rest of the "regular" blobs
+            sourceBlobItems.AddRange(from b in sourceBlobNames select new BlobItem { sourceBlobName = b });
+
+            // iterate through each source blob, one at a time.
+            foreach (var currBlobItem in sourceBlobItems)
+            {
                 var blockRanges = new List<BlockRange>();
                 long currentOffset = 0;
 
-                // iterate through the list of blocks and compute their effective offsets in the final file.
-                int chunkIndex = 0;
-                foreach (var blockListItem in sourceBlockList)
-                {
-                    // handle special case when the sourceBlob was put using PutBlob and has no blocks
-                    var blockLength = blockListItem == null ? sourceBlob.Properties.Length : blockListItem.Length;
+                var sourceBlobName = currBlobItem.sourceBlobName;
+                var sourceBlob = currBlobItem.useAsString ? null : sourceContainer.GetBlockBlobReference(sourceBlobName);
 
-                    // compute a unique blockId based on blob account + container + blob name (includes path) + block length + block "number"
-                    // TODO also include the endpoint when we generalize for all clouds
-                    var hashBasis = System.Text.Encoding.UTF8.GetBytes(string.Concat(sourceStorageAccountName, sourceStorageContainerName, sourceBlobName, blockLength, chunkIndex));
+                if (currBlobItem.useAsString)
+                {
+                    var hashBasis = System.Text.Encoding.UTF8.GetBytes(string.Concat(sourceStorageAccountName, sourceStorageContainerName, currBlobItem.sourceBlobName));
                     var newBlockId = Convert.ToBase64String(shaHasher.ComputeHash(hashBasis));
 
                     var newBlockRange = new BlockRange()
                     {
                         Name = newBlockId,
-                        StartOffset = currentOffset,
-                        Length = blockLength
+                        StringToUse = Regex.Unescape(currBlobItem.sourceBlobName)   // unescape is to decode \r \n \t etc.
                     };
 
-                    // increment this here itself as we may potentially skip to the next blob
-                    chunkIndex++;
-                    currentOffset += blockLength;
-
                     // check if this block has already been copied + committed at the destination, and in that case, skip it
-                    if (destBlockList.Contains(newBlockId))
-                    {
-                        continue;
-                    }
-                    else
+                    if (!destBlockList.Contains(newBlockId))
                     {
                         blockRanges.Add(newBlockRange);
+                    }
+                }
+                else
+                {
+                    Debug.WriteLine($"{DateTime.Now}: START {sourceBlobName}");
+
+                    // first we get the block list of the source blob. we use this to later parallelize the download / copy operation
+                    var sourceBlockList = sourceBlob.DownloadBlockListAsync(BlockListingFilter.Committed, null, null, null).GetAwaiter().GetResult();
+
+                    // in case the source blob is smaller then 256 MB (for latest API) then the blob is stored directly without any block list
+                    // so in this case the sourceBlockList is 0-length and we need to fake a BlockListItem as null, which will later be handled below
+                    if (sourceBlockList.Count() == 0 && sourceBlob.Properties.Length > 0)
+                    {
+                        ListBlockItem fakeBlockItem = null;
+                        sourceBlockList = sourceBlockList.Concat(new[] { fakeBlockItem });
+                    }
+
+                    // iterate through the list of blocks and compute their effective offsets in the final file.
+                    int chunkIndex = 0;
+                    foreach (var blockListItem in sourceBlockList)
+                    {
+                        // handle special case when the sourceBlob was put using PutBlob and has no blocks
+                        var blockLength = blockListItem == null ? sourceBlob.Properties.Length : blockListItem.Length;
+
+                        // compute a unique blockId based on blob account + container + blob name (includes path) + block length + block "number"
+                        // TODO also include the endpoint when we generalize for all clouds
+                        // TODO also consider a fileIndex component, to eventually allow for the same source blob to recur in the list of source blobs
+                        var hashBasis = System.Text.Encoding.UTF8.GetBytes(string.Concat(sourceStorageAccountName, sourceStorageContainerName, sourceBlobName, blockLength, chunkIndex));
+                        var newBlockId = Convert.ToBase64String(shaHasher.ComputeHash(hashBasis));
+
+                        var newBlockRange = new BlockRange()
+                        {
+                            Name = newBlockId,
+                            StartOffset = currentOffset,
+                            Length = blockLength
+                        };
+
+                        // increment this here itself as we may potentially skip to the next blob
+                        chunkIndex++;
+                        currentOffset += blockLength;
+
+                        // check if this block has already been copied + committed at the destination, and in that case, skip it
+                        if (destBlockList.Contains(newBlockId))
+                        {
+                            continue;
+                        }
+                        else
+                        {
+                            blockRanges.Add(newBlockRange);
+                        }
                     }
                 }
 
@@ -200,7 +240,8 @@
                     var sourceBlobLocalCopy = sourceBlob; // sourceContainer.GetBlockBlobReference(sourceBlobName);
 
                     // There is an explicit cast to an int here. Given we are always dealing with blocks of block blobs, and each block by itself cannot exceed 100 MB, this case is safe in our case
-                    using (var memStream = new MemoryStream((int)currRange.Length))
+                    // TODO make the text encoding flexible
+                    using (var memStream = currRange.StringToUse == null ? new MemoryStream((int)currRange.Length) : new MemoryStream(Encoding.UTF8.GetBytes(currRange.StringToUse)))
                     {
                         int sleepDuration = 1000;
 
@@ -208,7 +249,10 @@
                         {
                             try
                             {
-                                sourceBlobLocalCopy.DownloadRangeToStreamAsync(memStream, currRange.StartOffset, currRange.Length).GetAwaiter().GetResult();
+                                if (currRange.StringToUse == null)
+                                {
+                                    sourceBlobLocalCopy.DownloadRangeToStreamAsync(memStream, currRange.StartOffset, currRange.Length).GetAwaiter().GetResult();
+                                }
                             }
                             catch (StorageException ex)
                             {
@@ -322,7 +366,7 @@
                     break;
                 }
 
-                Debug.WriteLine($"{DateTime.Now}: END {sourceBlobName}");
+                Debug.WriteLine($"{DateTime.Now}: END {currBlobItem.sourceBlobName}");
 
                 // TODO optionally allow user to specify extra character(s) to append in between files. This is typically needed when the source files do not have a trailing \n character.
             }
