@@ -19,7 +19,7 @@ Use command line execution
 ## Concatenate blob-to-blob syntax
 A sample command line (for the blob-to-blob scenario) is shown below. it concatenates any files beginning with the specified prefix in the specified Azure storage account and container, into the destination Azure storage account and container.
 	
-	dotnet blobcat.dll concatblob --SourceAccount <source Azure storage account name> --SourceContainer <source Azure storage container name> --SourceKey <source Azure storage account key> --SourceFilePrefix <prefix> --SortFilenames true --DestAccount <Azure storage account name> --DestContainer <somecontainer> --DestFilename <somefilename can include foldername> --DestKey <Storage Key>
+	dotnet blobcat.dll concatblob --SourceAccount <source Azure storage account name> --SourceContainer <source Azure storage container name> --SourceKey <source Azure storage account key> | --SourceSAS <source SAS> --SourceFilePrefix <prefix> --SortFilenames true --DestAccount <Azure storage account name> --DestContainer <somecontainer> --DestFilename <somefilename can include foldername> --DestKey <Storage Key> | --DestSAS <dest SAS> --ColHeader <string representing the column headers>
 
 For a short explanation of each of these switches, you can run:
 	
@@ -28,7 +28,7 @@ For a short explanation of each of these switches, you can run:
 ## Concatenate files-to-blob syntax
 A sample command line (for the files-to-blob scenario) is shown below. it concatenates any files (on the local disk) beginning with the specified prefix into the destination Azure storage account and container.
 
-	dotnet blobcat.dll filestoblob --SourceFolder <folder path> --SourceFilePrefix <prefix> --SortFilenames true --DestAccount <Azure storage account name> --DestContainer <somecontainer> --DestFilename <somefilename can include foldername> --DestKey <Storage Key>
+	dotnet blobcat.dll filestoblob --SourceFolder <folder path> --SourceFilePrefix <prefix> --SortFilenames true --DestAccount <Azure storage account name> --DestContainer <somecontainer> --DestFilename <somefilename can include foldername> --DestKey <Storage Key> | --DestSAS <dest SAS> --ColHeader <string representing the column headers>
 
 For a short explanation of each of these switches, you can run:
 
