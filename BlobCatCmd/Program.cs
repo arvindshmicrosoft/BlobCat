@@ -1,11 +1,41 @@
-﻿using CommandLine;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text.RegularExpressions;
+﻿//------------------------------------------------------------------------------
+//<copyright company="Arvind Shyamsundar">
+//    The MIT License (MIT)
+//    
+//    Copyright (c) 2018 Arvind Shyamsundar
+//    
+//    Permission is hereby granted, free of charge, to any person obtaining a copy
+//    of this software and associated documentation files (the "Software"), to deal
+//    in the Software without restriction, including without limitation the rights
+//    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//    copies of the Software, and to permit persons to whom the Software is
+//    furnished to do so, subject to the following conditions:
+//    
+//    The above copyright notice and this permission notice shall be included in all
+//    copies or substantial portions of the Software.
+//    
+//    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//    SOFTWARE.
+//
+//    This sample code is not supported under any Microsoft standard support program or service. 
+//    The entire risk arising out of the use or performance of the sample scripts and documentation remains with you. 
+//    In no event shall Microsoft, its authors, or anyone else involved in the creation, production, or delivery of the scripts
+//    be liable for any damages whatsoever (including, without limitation, damages for loss of business profits,
+//    business interruption, loss of business information, or other pecuniary loss) arising out of the use of or inability
+//    to use the sample scripts or documentation, even if Microsoft has been advised of the possibility of such damages.
+//</copyright>
+//------------------------------------------------------------------------------
 
 namespace Microsoft.Azure.Samples.BlobCat
 {
+    using CommandLine;
+    using System.Linq;
+
     class Program
     {
         /// <summary>
@@ -51,52 +81,6 @@ namespace Microsoft.Azure.Samples.BlobCat
                 errs => 1);
 
             return parseResult;
-        }
-
-        /// <summary>
-        /// Helper method to parse the supplied command line. The expected format is given below:
-        /// action /param1:value1 /param2:value2
-        /// </summary>
-        /// <returns></returns>
-        private static Dictionary<string, string> ValidateCmdLine()
-        {
-            var cmdParams = new Dictionary<string, string>();
-            var paramsRegex = new Regex(@"(?<paramname>\/[a-zA-Z]+?\:)(?<value>[^\/]+)");
-            var actionRegex = new Regex(@"^(?<verb>\S+)\s+(?<restofcmdline>.+)");
-
-            var cmdLine = System.Environment.CommandLine;
-
-            Console.WriteLine(cmdLine);
-
-            // firstly get rid of the current assembly's path, which is prefixed as the first parameter to dotnet.exe
-            cmdLine = cmdLine.Replace(System.Reflection.Assembly.GetExecutingAssembly().Location, string.Empty).TrimStart();
-
-            var verbmatch = actionRegex.Match(cmdLine);
-            if (!verbmatch.Success)
-            {
-                return null;
-            }
-
-            // strip out the action verb and retain the rest of the cmd line
-            cmdLine = actionRegex.Replace(cmdLine, "${restofcmdline}");
-
-            var mc = paramsRegex.Matches(cmdLine);
-
-            foreach (Match parammatch in mc)
-            {
-                if (cmdParams.ContainsKey(parammatch.Groups["paramname"].Value.Trim().ToUpper()))
-                {
-                    Console.WriteLine($"Duplicate value specified for {parammatch.Groups["paramname"].Value.Trim().ToUpper()}");
-                    return null;
-                }
-
-                cmdParams.Add(
-                    parammatch.Groups["paramname"].Value.Trim().ToUpper(),
-                    parammatch.Groups["value"].Value.Trim()
-                    );
-            }
-
-            return cmdParams;
         }
     }    
 }
