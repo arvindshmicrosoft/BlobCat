@@ -35,6 +35,7 @@ namespace Microsoft.Azure.Samples.BlobCat
 {
     using CommandLine;
     using System.Linq;
+    using Microsoft.Extensions.Logging;
 
     class Program
     {
@@ -45,6 +46,10 @@ namespace Microsoft.Azure.Samples.BlobCat
         /// </summary>
         static int Main(string[] args)
         {
+            // create a logger instance
+            var loggerFactory = new LoggerFactory().AddDebug().AddConsole();
+            var myLogger = loggerFactory.CreateLogger("BlobCatCmd");
+
             var parseResult = CommandLine.Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args)
                 .MapResult(
                 (ConcatBlobOptions opts) => {
@@ -75,8 +80,9 @@ namespace Microsoft.Azure.Samples.BlobCat
                         opts.DestSAS,
                         opts.DestContainer,
                         opts.DestFilename,
-                        opts.ColHeader
-                        ) ? 0 : 1;
+                        opts.ColHeader,
+                        myLogger
+                        ).GetAwaiter().GetResult() ? 0 : 1;
                 },
                 errs => 1);
 
