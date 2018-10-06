@@ -66,7 +66,8 @@ namespace Microsoft.Azure.Samples.BlobCat
                         opts.DestSAS,
                         opts.DestContainer,
                         opts.DestFilename,
-                        opts.ColHeader) ? 0 : 1;
+                        opts.ColHeader,
+                        myLogger).GetAwaiter().GetResult() ? 0 : 1;
                 },
                 (FilesToBlobOptions opts) => 
                 {
