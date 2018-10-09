@@ -36,6 +36,9 @@ namespace Microsoft.Azure.Samples.BlobCat
     using CommandLine;
     using System.Linq;
     using Microsoft.Extensions.Logging;
+    using Microsoft.Extensions.Logging.Console;
+    using Microsoft.Extensions.DependencyInjection;
+    using System;
 
     class Program
     {
@@ -47,11 +50,20 @@ namespace Microsoft.Azure.Samples.BlobCat
         static int Main(string[] args)
         {
             // create a logger instance
-            var loggerFactory = new LoggerFactory().AddDebug().AddConsole();
-            var myLogger = loggerFactory.CreateLogger("BlobCatCmd");
+            var services = new ServiceCollection().AddLogging(config => {
+                config.AddConsole().AddDebug();
 
-            var parseResult = CommandLine.Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args)
-                .MapResult(
+                if (args.Contains("--Debug"))
+                {
+                    config.SetMinimumLevel(LogLevel.Debug);
+                }
+            }).BuildServiceProvider();
+
+            var myLogger = services.GetRequiredService<ILogger<Program>>();
+
+            var parseResult = Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args);
+
+            var retVal = parseResult.MapResult(
                 (ConcatBlobOptions opts) =>
                 {
                     return BlobCatEngine.BlobToBlob(
@@ -93,7 +105,11 @@ namespace Microsoft.Azure.Samples.BlobCat
                 },
                 errs => 1);
 
-            return parseResult;
+            // this seems to be required to consistently flush logger output to the console before exiting! 
+            // see https://github.com/aspnet/Logging/issues/631 for reference
+            ((IDisposable)services)?.Dispose();
+
+            return retVal;
         }
     }    
 }

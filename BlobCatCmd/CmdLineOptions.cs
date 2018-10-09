@@ -86,6 +86,9 @@ namespace Microsoft.Azure.Samples.BlobCat
 
         [Option("CalcMD5ForBlock", Default = false, Required = false, HelpText = "(true | false) Whether to sort the input file names")]
         public bool CalcMD5ForBlock { get; set; }
+
+        [Option("Debug", Default = false, Required = false, HelpText = "(true | false) Include debug output")]
+        public bool DebugOutput { get; set; }
     }
 
     [Verb("filestoblob", HelpText = "Concatenates a set of on-disk files into a single blob.")]
@@ -126,5 +129,8 @@ namespace Microsoft.Azure.Samples.BlobCat
 
         [Option("CalcMD5ForBlock", Default = false, Required = false, HelpText = "(true | false) Whether to sort the input file names")]
         public bool CalcMD5ForBlock { get; set; }
+
+        [Option("Debug", Default = false, Required = false, HelpText = "(true | false) Include debug output")]
+        public bool DebugOutput { get; set; }
     }
 }

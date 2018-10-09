@@ -112,7 +112,6 @@ namespace Microsoft.Azure.Samples.BlobCat
         {
             GlobalOptimizations();
 
-            // TODO check for null
             var destBlob = BlobHelpers.GetBlockBlob(destStorageAccountName,
                 destStorageContainerName,
                 destBlobName,
@@ -120,6 +119,12 @@ namespace Microsoft.Azure.Samples.BlobCat
                 destStorageAccountKey,
                 destEndpointSuffix,
                 logger);
+
+            if (destBlob is null)
+            {
+                logger.LogError($"Failed to get a reference to destination conatiner / blob {destBlobName}; exiting!");
+                return false;
+            }
 
             var destBlockList = new List<string>();
 
@@ -130,11 +135,16 @@ namespace Microsoft.Azure.Samples.BlobCat
             var blockList = await BlobHelpers.GetBlockListForBlob(destBlob, logger);
             if (blockList is null)
             {
-                // TODO this is an error condition, need to log and exit
+                // this is when the destination blob does not yet exist
+                logger.LogDebug($"Destination blob {destBlobName} does not exist (block listing returned null).");
             }
             else
             {
+                logger.LogDebug($"Destination blob {destBlobName} exists; trying to get block listing.");
+
                 destBlockList = new List<string>(blockList.Select(b => b.Name));
+
+                logger.LogDebug($"Destination blob {destBlobName} has {destBlockList.Count} blocks.");
             }
 
             // create a place holder for the final block list (to be eventually used for put block list) and pre-populate it with the known list of blocks
@@ -153,7 +163,12 @@ namespace Microsoft.Azure.Samples.BlobCat
                     sourceEndpointSuffix,
                     logger);
 
-                // TODO check for null being returned from above
+                // check for null being returned from above in which case we need to exit
+                if (sourceBlobNames is null)
+                {
+                    logger.LogError($"Souce blob listing failed to return any results. Exiting!");
+                    return false;
+                }
 
                 // if the user specified to sort the input blobs (only valid for the prefix case) then we will happily do that!
                 // The gotcha here is that this is a string sort. So if blobs have names like blob_9, blob_13, blob_6, blob_3, blob_1
@@ -189,7 +204,6 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                 var sourceBlobName = currBlobItem.sourceBlobName;
 
-                // TODO check for null from GetBlockBlob
                 var sourceBlob = currBlobItem.useAsString ? null : BlobHelpers.GetBlockBlob(sourceStorageAccountName,
                     sourceStorageContainerName,
                     sourceBlobName,
@@ -197,6 +211,12 @@ namespace Microsoft.Azure.Samples.BlobCat
                     sourceStorageAccountKey,
                     sourceEndpointSuffix,
                     logger);
+
+                if (!currBlobItem.useAsString && sourceBlob is null)
+                {
+                    logger.LogError($"Failed to get reference to source blob {sourceBlobName}, exiting!");
+                    return false;
+                }
 
                 if (currBlobItem.useAsString)
                 {
@@ -215,20 +235,23 @@ namespace Microsoft.Azure.Samples.BlobCat
                 }
                 else
                 {
-                    logger.LogInformation($"{DateTime.Now}: START {sourceBlobName}");
+                    logger.LogDebug($"START: {sourceBlobName}");
 
                     // first we get the block list of the source blob. we use this to later parallelize the download / copy operation
                     IEnumerable<ListBlockItem> sourceBlockList = await BlobHelpers.GetBlockListForBlob(sourceBlob, logger);
 
                     if (sourceBlockList is null)
                     {
-                        // TODO this is an error condition, log and exit
+                        logger.LogError($"Failed to get block list for source blob {sourceBlobName}; exiting!");
+                        return false;
                     }
 
                     // in case the source blob is smaller then 256 MB (for latest API) then the blob is stored directly without any block list
                     // so in this case the sourceBlockList is 0-length and we need to fake a BlockListItem as null, which will later be handled below
                     if (sourceBlockList.Count() == 0 && sourceBlob.Properties.Length > 0)
                     {
+                        logger.LogDebug($"Source blob {sourceBlobName} does not have blocks as it is a 'small blob'");
+
                         ListBlockItem fakeBlockItem = null;
                         sourceBlockList = sourceBlockList.Concat(new[] { fakeBlockItem });
                     }
@@ -237,6 +260,11 @@ namespace Microsoft.Azure.Samples.BlobCat
                     int chunkIndex = 0;
                     foreach (var blockListItem in sourceBlockList)
                     {
+                        if (blockListItem != null)
+                        {
+                            logger.LogDebug($"Processing blockID {blockListItem.Name} for source blob {sourceBlobName}");
+                        }
+
                         // handle special case when the sourceBlob was put using PutBlob and has no blocks
                         var blockLength = blockListItem == null ? sourceBlob.Properties.Length : blockListItem.Length;
 
@@ -262,16 +290,20 @@ namespace Microsoft.Azure.Samples.BlobCat
                         // check if this block has already been copied + committed at the destination, and in that case, skip it
                         if (destBlockList.Contains(newBlockRange.Name))
                         {
+                            logger.LogDebug($"Destination already has blockID {newBlockRange.Name} for source blob {sourceBlobName}; skipping");
+
                             continue;
                         }
                         else
                         {
+                            logger.LogDebug($"Adding blockID {newBlockRange.Name} for source blob {sourceBlobName} to work list");
+
                             blockRanges.Add(newBlockRange);
                         }
                     }
                 }
 
-                logger.LogDebug($"Number of ranges: {blockRanges.Count}");
+                logger.LogDebug($"Total number of of ranges to process for source blob {sourceBlobName} is {blockRanges.Count}");
 
                 // add this list of block IDs to the final list
                 finalBlockList.AddRange(blockRanges.Select(e => e.Name));
@@ -294,7 +326,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                     });
                 }
 
-                Debug.WriteLine($"{DateTime.Now}: END {currBlobItem.sourceBlobName}");
+                logger.LogDebug($"END: {currBlobItem.sourceBlobName}");
 
                 // TODO optionally allow user to specify extra character(s) to append in between files. This is typically needed when the source files do not have a trailing \n character.
             }
@@ -455,6 +487,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                 {
                     await ProcessBlockRange(br, destBlob, calcMD5ForBlock, logger);
                 }
+                // TODO should not be catching all exceptions
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Could not process block range");
