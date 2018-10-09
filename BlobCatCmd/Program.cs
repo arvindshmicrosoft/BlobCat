@@ -52,13 +52,15 @@ namespace Microsoft.Azure.Samples.BlobCat
 
             var parseResult = CommandLine.Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args)
                 .MapResult(
-                (ConcatBlobOptions opts) => {
-                return BlobCatEngine.BlobToBlob(
-                    opts.SourceAccountName,
-                    opts.SourceContainer,
-                    opts.SourceKey,
-                    opts.SourceSAS,
+                (ConcatBlobOptions opts) =>
+                {
+                    return BlobCatEngine.BlobToBlob(
+                        opts.SourceAccountName,
+                        opts.SourceContainer,
+                        opts.SourceKey,
+                        opts.SourceSAS,
                         opts.SourceFilePrefix,
+                        opts.SourceEndpointSuffix,
                         opts.SortFilenames,
                         opts.SourceFiles.ToList(),
                         opts.DestAccountName,
@@ -66,7 +68,9 @@ namespace Microsoft.Azure.Samples.BlobCat
                         opts.DestSAS,
                         opts.DestContainer,
                         opts.DestFilename,
+                        opts.DestEndpointSuffix,
                         opts.ColHeader,
+                        opts.CalcMD5ForBlock,
                         myLogger).GetAwaiter().GetResult() ? 0 : 1;
                 },
                 (FilesToBlobOptions opts) => 
@@ -81,7 +85,9 @@ namespace Microsoft.Azure.Samples.BlobCat
                         opts.DestSAS,
                         opts.DestContainer,
                         opts.DestFilename,
+                        opts.DestEndpointSuffix,
                         opts.ColHeader,
+                        opts.CalcMD5ForBlock,
                         myLogger
                         ).GetAwaiter().GetResult() ? 0 : 1;
                 },

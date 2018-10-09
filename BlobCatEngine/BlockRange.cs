@@ -5,6 +5,8 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Microsoft.WindowsAzure.Storage.Blob;
+using System.Data.HashFunction.CityHash;
+using Microsoft.Extensions.Logging;
 
 namespace Microsoft.Azure.Samples.BlobCat
 {
@@ -29,8 +31,9 @@ namespace Microsoft.Azure.Samples.BlobCat
         internal long Length;
         internal string Name;
                 
-        internal async virtual Task<BlockRangeData> GetBlockRangeData()
+        internal async virtual Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, ILogger logger)
         {
+            // TODO in all derived classes we need to check for 0-length block ranges
             return null;
         }
 
@@ -46,18 +49,30 @@ namespace Microsoft.Azure.Samples.BlobCat
                 md5Checksum = hasher.ComputeHash(memStream);
             }
 
-            // reset the position back to 0 before returning back to the caller
-            memStream.Position = 0;
-
             return Convert.ToBase64String(md5Checksum);
         }
 
         protected void ComputeBlockId(string basis)
         {
-            using (var shaHasher = new SHA384Managed())
+            var config = new CityHashConfig()
             {
-                this.Name = Convert.ToBase64String(shaHasher.ComputeHash(Encoding.UTF8.GetBytes(basis)));
-            }
+                HashSizeInBits = 128
+            };
+
+            var hasher = CityHashFactory.Instance.Create(config);
+            this.Name = hasher.ComputeHash(Encoding.UTF8.GetBytes(basis)).AsBase64String();
+
+            //var config = new FNVConfig()
+            //{
+            //    HashSizeInBits = 384,
+            //    Prime = 1239081328,
+            //    Offset = 123123213
+            //};
+
+            //var hasher = FNV1aFactory.Instance.Create(config);
+            //this.Name = hasher.ComputeHash(Encoding.UTF8.GetBytes(basis)).AsBase64String();
+
+            // this.Name = Convert.ToBase64String(hasher.ComputeHash(Encoding.UTF8.GetBytes(basis)));
         }
     }
 
@@ -73,8 +88,9 @@ namespace Microsoft.Azure.Samples.BlobCat
             StartOffset = startOffset;
         }
 
-        internal async override Task<BlockRangeData> GetBlockRangeData()
+        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, ILogger logger)
         {
+            // TODO logging
             var backingArray = new byte[this.Length];
 
             var memStream = new MemoryStream(backingArray);
@@ -85,7 +101,10 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                 await srcFile.ReadAsync(backingArray, 0, (int)this.Length);
 
-                var encodedChecksum = this.ComputeChecksumFromStream(memStream);
+                var encodedChecksum = calcMD5ForBlock ? this.ComputeChecksumFromStream(memStream) : null;
+
+                // reset the stream position back to 0
+                memStream.Position = 0;
 
                 return new BlockRangeData()
                 {
@@ -108,21 +127,31 @@ namespace Microsoft.Azure.Samples.BlobCat
             Length = blockLength;
         }
 
-        internal async override Task<BlockRangeData> GetBlockRangeData()
+        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, ILogger logger)
         {
-            // we do not wrap this around in a 'using' block because the caller will be calling Dispose() on the memory stream
-            var memStream = new MemoryStream((int)this.Length);
+            BlockRangeData retVal = null;
 
-            // TODO retry policy
-            await this.sourceBlob.DownloadRangeToStreamAsync(memStream, this.StartOffset, this.Length);
-
-            var encodedChecksum = this.ComputeChecksumFromStream(memStream);
-
-            return new BlockRangeData()
+            // use retry policy which will automatically handle the throttling related StorageExceptions
+            await BlobHelpers.GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
             {
-                MemStream = memStream,
-                Base64EncodedMD5Checksum = encodedChecksum
-            };
+                // we do not wrap this around in a 'using' block because the caller will be calling Dispose() on the memory stream
+                var memStream = new MemoryStream((int)this.Length);
+
+                await this.sourceBlob.DownloadRangeToStreamAsync(memStream, this.StartOffset, this.Length);
+
+                var encodedChecksum = calcMD5ForBlock ? this.ComputeChecksumFromStream(memStream) : null;
+
+                // reset the stream position back to 0
+                memStream.Position = 0;
+
+                retVal = new BlockRangeData()
+                {
+                    MemStream = memStream,
+                    Base64EncodedMD5Checksum = encodedChecksum
+                };
+            });
+
+            return retVal;
         }
     }
 
@@ -136,12 +165,17 @@ namespace Microsoft.Azure.Samples.BlobCat
             ComputeBlockId(hashBasis);
         }
 
-        internal async override Task<BlockRangeData> GetBlockRangeData()
+        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, ILogger logger)
         {
+            // TODO logging
+
             // we do not wrap this around in a 'using' block because the caller will be calling Dispose() on the memory stream
             var memStream = new MemoryStream(Encoding.UTF8.GetBytes(this.literalValue));
 
-            var encodedChecksum = this.ComputeChecksumFromStream(memStream);
+            var encodedChecksum = calcMD5ForBlock ? this.ComputeChecksumFromStream(memStream) : null;
+
+            // reset the stream position back to 0
+            memStream.Position = 0;
 
             return new BlockRangeData()
             {

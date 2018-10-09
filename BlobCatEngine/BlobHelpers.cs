@@ -1,23 +1,77 @@
 ﻿
 namespace Microsoft.Azure.Samples.BlobCat
 {
+    using Microsoft.Extensions.Logging;
     using Microsoft.WindowsAzure.Storage;
     using Microsoft.WindowsAzure.Storage.Blob;
+    using Polly;
+    using System;
     using System.Collections.Generic;
     using System.Linq;
     using System.Threading.Tasks;
 
     class BlobHelpers
     {
-        internal async static Task<IEnumerable<ListBlockItem>> GetBlockListForBlob(CloudBlockBlob destBlob)
+        /// <summary>
+        /// Helper method to centralize the criteria for whether a storage exception is "retryable". 
+        /// Currently we will retry whenever there is evidence of being throttled. Those are the string literals
+        /// which are embedded herein.
+        /// </summary>
+        /// <param name="ex"></param>
+        /// <returns></returns>
+        private static bool IsStorageExceptionRetryable(StorageException ex)
         {
-            if (!await destBlob.ExistsAsync())
-            {
-                return null;
-            }
+            var errorCode = ex.RequestInformation.ErrorCode;
+            return (
+            "ServerBusy" == errorCode
+            || "InternalError" == errorCode
+            || "OperationTimedOut" == errorCode);
+        }
 
-            // TODO retry policy
-            return await destBlob.DownloadBlockListAsync(BlockListingFilter.Committed, null, null, null);
+        /// <summary>
+        /// Wrapper to centralize the storage retry policy definition; this is used in multiple places in the code
+        /// </summary>
+        /// <returns></returns>
+        internal static Polly.Retry.RetryPolicy GetStorageRetryPolicy(ILogger logger)
+        {
+            return Policy.Handle<StorageException>(ex => IsStorageExceptionRetryable(ex))
+                    // TODO make retry count and sleep configurable???
+                    .WaitAndRetryAsync(
+                        5,
+                        retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+                        (Exception genEx, TimeSpan timeSpan, Context context) =>
+                        {
+                            // TODO how can the below be avoided; seems like Polly only allows generic Exception?
+                            var ex = genEx as StorageException;
+
+                            logger.LogError($"Error received: {ex.Message} with Error code {ex.RequestInformation.ErrorCode}");
+
+                            foreach (var addDetails in ex.RequestInformation.ExtendedErrorInformation.AdditionalDetails)
+                            {
+                                logger.LogError($"{addDetails.Key}: {addDetails.Value}");
+                            }
+                        });
+        }
+
+        internal async static Task<IEnumerable<ListBlockItem>> GetBlockListForBlob(CloudBlockBlob destBlob, ILogger logger)
+        {
+            IEnumerable<ListBlockItem> retVal = null;
+
+            // use retry policy which will automatically handle the throttling related StorageExceptions
+            await GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+            {
+                if (!await destBlob.ExistsAsync())
+                {
+                    // obvious but setting explicitly
+                    retVal = null;
+                }
+                else
+                {
+                    retVal = await destBlob.DownloadBlockListAsync(BlockListingFilter.Committed, null, null, null);
+                }
+            });
+
+            return retVal;
         }
 
         /// <summary>
@@ -28,31 +82,44 @@ namespace Microsoft.Azure.Samples.BlobCat
         /// <param name="inBlobPrefix"></param>
         /// <param name="inSAS"></param>
         /// <param name="inStorageAccountKey"></param>
+        /// <param name="inEndpointSuffix"></param>
         /// <returns></returns>
         internal async static Task<List<string>> GetBlobListing(string inStorageAccountName,
             string inStorageContainerName,
             string inBlobPrefix,
             string inSAS,
-            string inStorageAccountKey)
+            string inStorageAccountKey,
+            string inEndpointSuffix,
+            ILogger logger)
         {
-            var blobContainer = GetBlobContainerReference(inStorageAccountName,
+            List<string> retVal = null;
+
+            // use retry policy which will automatically handle the throttling related StorageExceptions
+            await GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+            {
+                var blobContainer = GetBlobContainerReference(inStorageAccountName,
                 inStorageContainerName,
                 inSAS,
-                inStorageAccountKey);
+                inStorageAccountKey,
+                inEndpointSuffix,
+                logger);
 
-            var blobListing = new List<IListBlobItem>();
-            BlobContinuationToken continuationToken = null;
+                var blobListing = new List<IListBlobItem>();
+                BlobContinuationToken continuationToken = null;
 
-            // we have a prefix specified, so get a of blobs with a specific prefix and then add them to a list
-            do
-            {
-                var response = blobContainer.ListBlobsSegmentedAsync(inBlobPrefix, true, BlobListingDetails.None, null, continuationToken, null, null).GetAwaiter().GetResult();
-                continuationToken = response.ContinuationToken;
-                blobListing.AddRange(response.Results);
-            }
-            while (continuationToken != null);
+                // we have a prefix specified, so get a of blobs with a specific prefix and then add them to a list
+                do
+                {
+                    var response = await blobContainer.ListBlobsSegmentedAsync(inBlobPrefix, true, BlobListingDetails.None, null, continuationToken, null, null);
+                    continuationToken = response.ContinuationToken;
+                    blobListing.AddRange(response.Results);
+                }
+                while (continuationToken != null);
 
-            return (from b in blobListing.OfType<CloudBlockBlob>() select b.Name).ToList();
+                retVal = (from b in blobListing.OfType<CloudBlockBlob>() select b.Name).ToList();
+            });
+
+            return retVal;
         }
 
         /// <summary>
@@ -63,20 +130,33 @@ namespace Microsoft.Azure.Samples.BlobCat
         /// <param name="inBlobName"></param>
         /// <param name="inSAS"></param>
         /// <param name="inStorageAccountKey"></param>
+        /// <param name="inEndpointSuffix"></param>
         /// <returns></returns>
 
         internal static CloudBlockBlob GetBlockBlob(string inStorageAccountName,
             string inStorageContainerName,
             string inBlobName,
             string inSAS,
-            string inStorageAccountKey)
+            string inStorageAccountKey,
+            string inEndpointSuffix,
+            ILogger logger)
         {
-            var blobContainer = GetBlobContainerReference(inStorageAccountName,
+            CloudBlockBlob retVal = null;
+
+            // use retry policy which will automatically handle the throttling related StorageExceptions
+            GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+            {
+                var blobContainer = GetBlobContainerReference(inStorageAccountName,
                 inStorageContainerName,
                 inSAS,
-                inStorageAccountKey);
+                inStorageAccountKey,
+                inEndpointSuffix,
+                logger);
 
-            return blobContainer.GetBlockBlobReference(inBlobName);
+                retVal = blobContainer.GetBlockBlobReference(inBlobName);
+            });
+
+            return retVal;
         }
 
         /// <summary>
@@ -87,18 +167,30 @@ namespace Microsoft.Azure.Samples.BlobCat
         /// <param name="inSAS"></param>
         /// <param name="inStorageAccountKey"></param>
         /// <returns></returns>
-        internal static CloudBlobContainer GetBlobContainerReference(string inStorageAccountName, string inStorageContainerName, string inSAS, string inStorageAccountKey)
+        internal static CloudBlobContainer GetBlobContainerReference(string inStorageAccountName,
+            string inStorageContainerName,
+            string inSAS,
+            string inStorageAccountKey,
+            string inEndpointSuffix,
+            ILogger logger)
         {
-            var typeOfinCredential = string.IsNullOrEmpty(inSAS) ? "AccountKey" : "SharedAccessSignature";
-            var inCredential = string.IsNullOrEmpty(inSAS) ? inStorageAccountKey : inSAS;
+            CloudBlobContainer retVal = null;
 
-            // TODO remove hard-coding of core.windows.net
-            string inAzureStorageConnStr = $"DefaultEndpointsProtocol=https;AccountName={inStorageAccountName};{typeOfinCredential}={inCredential};EndpointSuffix=core.windows.net";
+            // use retry policy which will automatically handle the throttling related StorageExceptions
+            GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+            {
+                var typeOfinCredential = string.IsNullOrEmpty(inSAS) ? "AccountKey" : "SharedAccessSignature";
+                var inCredential = string.IsNullOrEmpty(inSAS) ? inStorageAccountKey : inSAS;
 
-            var inStorageAccount = CloudStorageAccount.Parse(inAzureStorageConnStr);
-            var inBlobClient = inStorageAccount.CreateCloudBlobClient();
+                string inAzureStorageConnStr = $"DefaultEndpointsProtocol=https;AccountName={inStorageAccountName};{typeOfinCredential}={inCredential};EndpointSuffix={inEndpointSuffix}";
 
-            return inBlobClient.GetContainerReference(inStorageContainerName);
+                var inStorageAccount = CloudStorageAccount.Parse(inAzureStorageConnStr);
+                var inBlobClient = inStorageAccount.CreateCloudBlobClient();
+
+                retVal = inBlobClient.GetContainerReference(inStorageContainerName);
+            });
+
+            return retVal;
         }
     }
 }

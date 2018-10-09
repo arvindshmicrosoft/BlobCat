@@ -39,10 +39,13 @@ namespace Microsoft.Azure.Samples.BlobCat
     [Verb("concatblob", HelpText = "Concatenates a set of blobs into a single blob.")]
     class ConcatBlobOptions
     {
-        [Option("SourceAccount", Required = false, HelpText = "Source storage account name")]
+        [Option("SourceEndpointSuffix", Required = false, HelpText = "The source storage endpoint suffix to use", Default = "core.windows.net")]
+        public string SourceEndpointSuffix { get; set; }
+
+        [Option("SourceAccount", Required = true, HelpText = "Source storage account name")]
         public string SourceAccountName { get; set; }
 
-        [Option("SourceContainer", Required = false, HelpText = "Source container name")]
+        [Option("SourceContainer", Required = true, HelpText = "Source container name")]
         public string SourceContainer { get; set; }
 
         [Option("SourceKey", Required = false, HelpText = "Source storage account key")]
@@ -57,13 +60,16 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("SourceFilePrefix", Required = false, HelpText = "Source file prefix - this can include folder hierarchy (if applicable)")]
         public string SourceFilePrefix { get; set; }
 
-        [Option("SortFilenames", Required = false, HelpText = "(true | false) Whether to sort the input file names")]
+        [Option("SortFilenames", Required = false, Default = false, HelpText = "(true | false) Whether to sort the input file names")]
         public bool SortFilenames { get; set; }
 
-        [Option("DestAccount", Required = false, HelpText = "Destination storage account name")]
+        [Option("DestEndpointSuffix", Required = false, HelpText = "The Dest storage endpoint suffix to use", Default = "core.windows.net")]
+        public string DestEndpointSuffix { get; set; }
+
+        [Option("DestAccount", Required = true, HelpText = "Destination storage account name")]
         public string DestAccountName { get; set; }
 
-        [Option("DestContainer", Required = false, HelpText = "Destination container name")]
+        [Option("DestContainer", Required = true, HelpText = "Destination container name")]
         public string DestContainer { get; set; }
 
         [Option("DestKey", Required = false, HelpText = "Destination storage account key")]
@@ -72,11 +78,14 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("DestSAS", Required = false, HelpText = "Destination SAS")]
         public string DestSAS { get; set; }
 
-        [Option("DestFilename", Required = false, HelpText = "Destination file name")]
+        [Option("DestFilename", Required = true, HelpText = "Destination file name")]
         public string DestFilename { get; set; }
 
         [Option("ColHeader", Required = false, HelpText = "Column header string")]
         public string ColHeader { get; set; }
+
+        [Option("CalcMD5ForBlock", Default = false, Required = false, HelpText = "(true | false) Whether to sort the input file names")]
+        public bool CalcMD5ForBlock { get; set; }
     }
 
     [Verb("filestoblob", HelpText = "Concatenates a set of on-disk files into a single blob.")]
@@ -91,13 +100,16 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("SourceFilePrefix", Required = false, HelpText = "Source file name prefix")]
         public string SourceFilePrefix { get; set; }
 
-        [Option("SortFilenames", Required = false, HelpText = "(true | false) Whether to sort the input file names")]
+        [Option("SortFilenames", Default = false, Required = false, HelpText = "(true | false) Whether to sort the input file names")]
         public bool SortFilenames { get; set; }
 
-        [Option("DestAccount", Required = false, HelpText = "Destination storage account name")]
+        [Option("DestEndpointSuffix", Required = false, HelpText = "The Dest storage endpoint suffix to use", Default = "core.windows.net")]
+        public string DestEndpointSuffix { get; set; }
+
+        [Option("DestAccount", Required = true, HelpText = "Destination storage account name")]
         public string DestAccountName { get; set; }
 
-        [Option("DestContainer", Required = false, HelpText = "Destination container name")]
+        [Option("DestContainer", Required = true, HelpText = "Destination container name")]
         public string DestContainer { get; set; }
 
         [Option("DestKey", Required = false, HelpText = "Destination storage account key")]
@@ -106,10 +118,13 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("DestSAS", Required = false, HelpText = "Destination SAS")]
         public string DestSAS { get; set; }
 
-        [Option("DestFilename", Required = false, HelpText = "Destination file name")]
+        [Option("DestFilename", Required = true, HelpText = "Destination file name")]
         public string DestFilename { get; set; }
 
         [Option("ColHeader", Required = false, HelpText = "Column header string")]
         public string ColHeader { get; set; }
+
+        [Option("CalcMD5ForBlock", Default = false, Required = false, HelpText = "(true | false) Whether to sort the input file names")]
+        public bool CalcMD5ForBlock { get; set; }
     }
 }
