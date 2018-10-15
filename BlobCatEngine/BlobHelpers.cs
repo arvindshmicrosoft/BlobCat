@@ -41,16 +41,30 @@ namespace Microsoft.Azure.Samples.BlobCat
                         retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
                         (Exception genEx, TimeSpan timeSpan, Context context) =>
                         {
-                            // TODO how can the below be avoided; seems like Polly only allows generic Exception?
+                            // TODO how can the below cast to StorageException be avoided; seems like Polly only allows generic Exception?
                             var ex = genEx as StorageException;
 
-                            logger.LogError($"Error received: {ex.Message} with Error code {ex.RequestInformation.ErrorCode}");
-
-                            foreach (var addDetails in ex.RequestInformation.ExtendedErrorInformation.AdditionalDetails)
-                            {
-                                logger.LogError($"{addDetails.Key}: {addDetails.Value}");
-                            }
+                            LogStorageException(ex, logger);
                         });
+        }
+
+        /// <summary>
+        /// Helper to unwrap the StorageException and log additional details
+        /// </summary>
+        /// <param name="ex"></param>
+        /// <param name="logger"></param>
+        internal static void LogStorageException(StorageException ex, ILogger logger)
+        {
+            logger.LogError($"StorageException details: {ex.Message} with Error code {ex.RequestInformation.ErrorCode} and Error Message {ex.RequestInformation.ExtendedErrorInformation.ErrorMessage}. Additional details follow:");
+
+            foreach (var addDetails in ex.RequestInformation.ExtendedErrorInformation.AdditionalDetails)
+            {
+                logger.LogError($"{addDetails.Key}: {addDetails.Value}");
+            }
+
+            logger.LogDebug(ex, "Storage Exception details", null);
+
+            return;
         }
 
         internal async static Task<IEnumerable<ListBlockItem>> GetBlockListForBlob(CloudBlockBlob destBlob, ILogger logger)

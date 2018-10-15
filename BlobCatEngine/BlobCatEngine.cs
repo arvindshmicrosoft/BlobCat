@@ -110,228 +110,242 @@ namespace Microsoft.Azure.Samples.BlobCat
             bool calcMD5ForBlock,
             ILogger logger)
         {
-            GlobalOptimizations();
-
-            var destBlob = BlobHelpers.GetBlockBlob(destStorageAccountName,
-                destStorageContainerName,
-                destBlobName,
-                destSAS,
-                destStorageAccountKey,
-                destEndpointSuffix,
-                logger);
-
-            if (destBlob is null)
+            try
             {
-                logger.LogError($"Failed to get a reference to destination conatiner / blob {destBlobName}; exiting!");
-                return false;
-            }
+                var sw = Stopwatch.StartNew();
 
-            var destBlockList = new List<string>();
+                GlobalOptimizations();
 
-            // check if the blob exists, in which case we need to also get the list of blocks associated with that blob
-            // this will help to skip blocks which were already completed, and thereby help with resume
-            // TODO Block IDs are not unique across files - this will trip up the logic
-            // only get committed blocks to be sure 
-            var blockList = await BlobHelpers.GetBlockListForBlob(destBlob, logger);
-            if (blockList is null)
-            {
-                // this is when the destination blob does not yet exist
-                logger.LogDebug($"Destination blob {destBlobName} does not exist (block listing returned null).");
-            }
-            else
-            {
-                logger.LogDebug($"Destination blob {destBlobName} exists; trying to get block listing.");
-
-                destBlockList = new List<string>(blockList.Select(b => b.Name));
-
-                logger.LogDebug($"Destination blob {destBlobName} has {destBlockList.Count} blocks.");
-            }
-
-            // create a place holder for the final block list (to be eventually used for put block list) and pre-populate it with the known list of blocks
-            // already associated with the destination blob
-            var finalBlockList = new List<string>(destBlockList);
-
-            // check if there is a specific list of blobs given by the user, in which case the immediate 'if' code below will be skipped
-            if (sourceBlobNames is null || sourceBlobNames.Count == 0)
-            {
-                // now just get the blob names, that's all we need for further processing
-                sourceBlobNames = await BlobHelpers.GetBlobListing(sourceStorageAccountName,
-                    sourceStorageContainerName,
-                    sourceBlobPrefix,
-                    sourceSAS,
-                    sourceStorageAccountKey,
-                    sourceEndpointSuffix,
+                var destBlob = BlobHelpers.GetBlockBlob(destStorageAccountName,
+                    destStorageContainerName,
+                    destBlobName,
+                    destSAS,
+                    destStorageAccountKey,
+                    destEndpointSuffix,
                     logger);
 
-                // check for null being returned from above in which case we need to exit
-                if (sourceBlobNames is null)
+                if (destBlob is null)
                 {
-                    logger.LogError($"Souce blob listing failed to return any results. Exiting!");
+                    logger.LogError($"Failed to get a reference to destination conatiner / blob {destBlobName}; exiting!");
                     return false;
                 }
 
-                // if the user specified to sort the input blobs (only valid for the prefix case) then we will happily do that!
-                // The gotcha here is that this is a string sort. So if blobs have names like blob_9, blob_13, blob_6, blob_3, blob_1
-                // the sort order will result in blob_1, blob_13, blob_3, blob_6, blob_9. 
-                // To avoid issues like this the user must 0-prefix the numbers embedded in the filenames.
-                if (sortBlobs)
+                var destBlockList = new List<string>();
+
+                // check if the blob exists, in which case we need to also get the list of blocks associated with that blob
+                // this will help to skip blocks which were already completed, and thereby help with resume
+                // TODO Block IDs are not unique across files - this will trip up the logic
+                // only get committed blocks to be sure 
+                var blockList = await BlobHelpers.GetBlockListForBlob(destBlob, logger);
+                if (blockList is null)
                 {
-                    sourceBlobNames.Sort();
-                }
-            }
-
-            var sourceBlobItems = new List<BlobItem>();
-
-            // first, do we have a column header string specified, if so, prepend it to the list of "source blobs" 
-            // clearly denoting this has to be used as a string
-            if (!string.IsNullOrEmpty(colHeader))
-            {
-                sourceBlobItems.Add(new BlobItem()
-                {
-                    sourceBlobName = colHeader,
-                    useAsString = true
-                });
-            }
-
-            // now copy in the rest of the "regular" blobs
-            sourceBlobItems.AddRange(from b in sourceBlobNames select new BlobItem { sourceBlobName = b });
-
-            // iterate through each source blob, one at a time.
-            foreach (var currBlobItem in sourceBlobItems)
-            {
-                var blockRanges = new List<BlockRangeBase>();
-                long currentOffset = 0;
-
-                var sourceBlobName = currBlobItem.sourceBlobName;
-
-                var sourceBlob = currBlobItem.useAsString ? null : BlobHelpers.GetBlockBlob(sourceStorageAccountName,
-                    sourceStorageContainerName,
-                    sourceBlobName,
-                    sourceSAS,
-                    sourceStorageAccountKey,
-                    sourceEndpointSuffix,
-                    logger);
-
-                if (!currBlobItem.useAsString && sourceBlob is null)
-                {
-                    logger.LogError($"Failed to get reference to source blob {sourceBlobName}, exiting!");
-                    return false;
-                }
-
-                if (currBlobItem.useAsString)
-                {
-                    var newBlockRange = new StringBlockRange(Regex.Unescape(currBlobItem.sourceBlobName), 
-                        string.Concat(
-                            sourceEndpointSuffix,
-                            sourceStorageAccountName,
-                            sourceStorageContainerName,
-                            currBlobItem.sourceBlobName));
-
-                    // check if this block has already been copied + committed at the destination, and in that case, skip it
-                    if (!destBlockList.Contains(newBlockRange.Name))
-                    {
-                        blockRanges.Add(newBlockRange);
-                    }
+                    // this is when the destination blob does not yet exist
+                    logger.LogDebug($"Destination blob {destBlobName} does not exist (block listing returned null).");
                 }
                 else
                 {
-                    logger.LogDebug($"START: {sourceBlobName}");
+                    logger.LogDebug($"Destination blob {destBlobName} exists; trying to get block listing.");
 
-                    // first we get the block list of the source blob. we use this to later parallelize the download / copy operation
-                    IEnumerable<ListBlockItem> sourceBlockList = await BlobHelpers.GetBlockListForBlob(sourceBlob, logger);
+                    destBlockList = new List<string>(blockList.Select(b => b.Name));
 
-                    if (sourceBlockList is null)
+                    logger.LogDebug($"Destination blob {destBlobName} has {destBlockList.Count} blocks.");
+                }
+
+                // create a place holder for the final block list (to be eventually used for put block list) and pre-populate it with the known list of blocks
+                // already associated with the destination blob
+                var finalBlockList = new List<string>(destBlockList);
+
+                // check if there is a specific list of blobs given by the user, in which case the immediate 'if' code below will be skipped
+                if (sourceBlobNames is null || sourceBlobNames.Count == 0)
+                {
+                    // now just get the blob names, that's all we need for further processing
+                    sourceBlobNames = await BlobHelpers.GetBlobListing(sourceStorageAccountName,
+                        sourceStorageContainerName,
+                        sourceBlobPrefix,
+                        sourceSAS,
+                        sourceStorageAccountKey,
+                        sourceEndpointSuffix,
+                        logger);
+
+                    // check for null being returned from above in which case we need to exit
+                    if (sourceBlobNames is null)
                     {
-                        logger.LogError($"Failed to get block list for source blob {sourceBlobName}; exiting!");
+                        logger.LogError($"Souce blob listing failed to return any results. Exiting!");
                         return false;
                     }
 
-                    // in case the source blob is smaller then 256 MB (for latest API) then the blob is stored directly without any block list
-                    // so in this case the sourceBlockList is 0-length and we need to fake a BlockListItem as null, which will later be handled below
-                    if (sourceBlockList.Count() == 0 && sourceBlob.Properties.Length > 0)
+                    // if the user specified to sort the input blobs (only valid for the prefix case) then we will happily do that!
+                    // The gotcha here is that this is a string sort. So if blobs have names like blob_9, blob_13, blob_6, blob_3, blob_1
+                    // the sort order will result in blob_1, blob_13, blob_3, blob_6, blob_9. 
+                    // To avoid issues like this the user must 0-prefix the numbers embedded in the filenames.
+                    if (sortBlobs)
                     {
-                        logger.LogDebug($"Source blob {sourceBlobName} does not have blocks as it is a 'small blob'");
+                        sourceBlobNames.Sort();
+                    }
+                }
 
-                        ListBlockItem fakeBlockItem = null;
-                        sourceBlockList = sourceBlockList.Concat(new[] { fakeBlockItem });
+                var sourceBlobItems = new List<BlobItem>();
+
+                // first, do we have a column header string specified, if so, prepend it to the list of "source blobs" 
+                // clearly denoting this has to be used as a string
+                if (!string.IsNullOrEmpty(colHeader))
+                {
+                    sourceBlobItems.Add(new BlobItem()
+                    {
+                        sourceBlobName = colHeader,
+                        useAsString = true
+                    });
+                }
+
+                // now copy in the rest of the "regular" blobs
+                sourceBlobItems.AddRange(from b in sourceBlobNames select new BlobItem { sourceBlobName = b });
+
+                // iterate through each source blob, one at a time.
+                foreach (var currBlobItem in sourceBlobItems)
+                {
+                    var blockRanges = new List<BlockRangeBase>();
+                    long currentOffset = 0;
+
+                    var sourceBlobName = currBlobItem.sourceBlobName;
+
+                    var sourceBlob = currBlobItem.useAsString ? null : BlobHelpers.GetBlockBlob(sourceStorageAccountName,
+                        sourceStorageContainerName,
+                        sourceBlobName,
+                        sourceSAS,
+                        sourceStorageAccountKey,
+                        sourceEndpointSuffix,
+                        logger);
+
+                    if (!currBlobItem.useAsString && sourceBlob is null)
+                    {
+                        logger.LogError($"Failed to get reference to source blob {sourceBlobName}, exiting!");
+                        return false;
                     }
 
-                    // iterate through the list of blocks and compute their effective offsets in the final file.
-                    int chunkIndex = 0;
-                    foreach (var blockListItem in sourceBlockList)
+                    if (currBlobItem.useAsString)
                     {
-                        if (blockListItem != null)
-                        {
-                            logger.LogDebug($"Processing blockID {blockListItem.Name} for source blob {sourceBlobName}");
-                        }
-
-                        // handle special case when the sourceBlob was put using PutBlob and has no blocks
-                        var blockLength = blockListItem == null ? sourceBlob.Properties.Length : blockListItem.Length;
-
-                        // compute a unique blockId based on blob account + container + blob name (includes path) + block length + block "number"
-                        // TODO also consider a fileIndex component, to eventually allow for the same source blob to recur in the list of source blobs
-
-                        var newBlockRange = new BlobBlockRange(sourceBlob,
+                        var newBlockRange = new StringBlockRange(Regex.Unescape(currBlobItem.sourceBlobName),
                             string.Concat(
                                 sourceEndpointSuffix,
                                 sourceStorageAccountName,
                                 sourceStorageContainerName,
-                                sourceBlobName,
-                                blockLength,
-                                chunkIndex),
-                            currentOffset,
-                            blockLength
-                            );
-
-                        // increment this here itself as we may potentially skip to the next blob
-                        chunkIndex++;
-                        currentOffset += blockLength;
+                                currBlobItem.sourceBlobName));
 
                         // check if this block has already been copied + committed at the destination, and in that case, skip it
-                        if (destBlockList.Contains(newBlockRange.Name))
+                        if (!destBlockList.Contains(newBlockRange.Name))
                         {
-                            logger.LogDebug($"Destination already has blockID {newBlockRange.Name} for source blob {sourceBlobName}; skipping");
-
-                            continue;
-                        }
-                        else
-                        {
-                            logger.LogDebug($"Adding blockID {newBlockRange.Name} for source blob {sourceBlobName} to work list");
-
                             blockRanges.Add(newBlockRange);
                         }
                     }
-                }
-
-                logger.LogDebug($"Total number of of ranges to process for source blob {sourceBlobName} is {blockRanges.Count}");
-
-                // add this list of block IDs to the final list
-                finalBlockList.AddRange(blockRanges.Select(e => e.Name));
-
-                // reset back to 0 to actually execute the copies
-                currentOffset = 0;
-
-                // call the helper function to actually execute the writes to blob
-                await ProcessBlockRanges(blockRanges, destBlob, calcMD5ForBlock, logger);
-
-                // each iteration (each source file) we will commit an ever-increasing super-set of block IDs
-                // we do this to support "resume" operations later on.
-                // we will only do this if we actually did any work here TODO review
-                if (blockRanges.Count() > 0)
-                {
-                    // use retry policy which will automatically handle the throttling related StorageExceptions
-                    await BlobHelpers.GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+                    else
                     {
-                        await destBlob.PutBlockListAsync(finalBlockList);
-                    });
+                        logger.LogDebug($"START: {sourceBlobName}");
+
+                        // first we get the block list of the source blob. we use this to later parallelize the download / copy operation
+                        IEnumerable<ListBlockItem> sourceBlockList = await BlobHelpers.GetBlockListForBlob(sourceBlob, logger);
+
+                        if (sourceBlockList is null)
+                        {
+                            logger.LogError($"Failed to get block list for source blob {sourceBlobName}; exiting!");
+                            return false;
+                        }
+
+                        // in case the source blob is smaller then 256 MB (for latest API) then the blob is stored directly without any block list
+                        // so in this case the sourceBlockList is 0-length and we need to fake a BlockListItem as null, which will later be handled below
+                        if (sourceBlockList.Count() == 0 && sourceBlob.Properties.Length > 0)
+                        {
+                            logger.LogDebug($"Source blob {sourceBlobName} does not have blocks as it is a 'small blob'");
+
+                            ListBlockItem fakeBlockItem = null;
+                            sourceBlockList = sourceBlockList.Concat(new[] { fakeBlockItem });
+                        }
+
+                        // iterate through the list of blocks and compute their effective offsets in the final file.
+                        int chunkIndex = 0;
+                        foreach (var blockListItem in sourceBlockList)
+                        {
+                            if (blockListItem != null)
+                            {
+                                logger.LogDebug($"Processing blockID {blockListItem.Name} for source blob {sourceBlobName}");
+                            }
+
+                            // handle special case when the sourceBlob was put using PutBlob and has no blocks
+                            var blockLength = blockListItem == null ? sourceBlob.Properties.Length : blockListItem.Length;
+
+                            // compute a unique blockId based on blob account + container + blob name (includes path) + block length + block "number"
+                            // TODO also consider a fileIndex component, to eventually allow for the same source blob to recur in the list of source blobs
+
+                            var newBlockRange = new BlobBlockRange(sourceBlob,
+                                string.Concat(
+                                    sourceEndpointSuffix,
+                                    sourceStorageAccountName,
+                                    sourceStorageContainerName,
+                                    sourceBlobName,
+                                    blockLength,
+                                    chunkIndex),
+                                currentOffset,
+                                blockLength
+                                );
+
+                            // increment this here itself as we may potentially skip to the next blob
+                            chunkIndex++;
+                            currentOffset += blockLength;
+
+                            // check if this block has already been copied + committed at the destination, and in that case, skip it
+                            if (destBlockList.Contains(newBlockRange.Name))
+                            {
+                                logger.LogDebug($"Destination already has blockID {newBlockRange.Name} for source blob {sourceBlobName}; skipping");
+
+                                continue;
+                            }
+                            else
+                            {
+                                logger.LogDebug($"Adding blockID {newBlockRange.Name} for source blob {sourceBlobName} to work list");
+
+                                blockRanges.Add(newBlockRange);
+                            }
+                        }
+                    }
+
+                    logger.LogDebug($"Total number of of ranges to process for source blob {sourceBlobName} is {blockRanges.Count}");
+
+                    // add this list of block IDs to the final list
+                    finalBlockList.AddRange(blockRanges.Select(e => e.Name));
+
+                    // reset back to 0 to actually execute the copies
+                    currentOffset = 0;
+
+                    // call the helper function to actually execute the writes to blob
+                    await ProcessBlockRanges(blockRanges, destBlob, calcMD5ForBlock, logger);
+
+                    // each iteration (each source file) we will commit an ever-increasing super-set of block IDs
+                    // we do this to support "resume" operations later on.
+                    // we will only do this if we actually did any work here TODO review
+                    if (blockRanges.Count() > 0)
+                    {
+                        // use retry policy which will automatically handle the throttling related StorageExceptions
+                        await BlobHelpers.GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+                        {
+                            await destBlob.PutBlockListAsync(finalBlockList);
+                        });
+                    }
+
+                    logger.LogDebug($"END: {currBlobItem.sourceBlobName}");
+
+                    // TODO optionally allow user to specify extra character(s) to append in between files. This is typically needed when the source files do not have a trailing \n character.
                 }
 
-                logger.LogDebug($"END: {currBlobItem.sourceBlobName}");
+                sw.Stop();
 
-                // TODO optionally allow user to specify extra character(s) to append in between files. This is typically needed when the source files do not have a trailing \n character.
+                logger.LogInformation($"BlobToBlob operation suceeded in {sw.Elapsed.TotalSeconds} seconds.");
+            }
+            catch (StorageException ex)
+            {
+                BlobHelpers.LogStorageException(ex, logger);
+
+                return false;
             }
 
-            // TODO handle failures.
             return true;
         }
 
@@ -369,107 +383,121 @@ namespace Microsoft.Azure.Samples.BlobCat
             bool calcMD5ForBlock,
             ILogger logger)
         {
-            GlobalOptimizations();
-
-            // TODO check for null from below func
-            // get a reference to the destination blob
-            var destBlob = BlobHelpers.GetBlockBlob(destStorageAccountName,
-                destStorageContainerName,
-                destBlobName,
-                destSAS,
-                destStorageAccountKey,
-                destEndpointSuffix,
-                logger);
-
-            var destBlockList = new List<string>();
-
-            // this will start off as blank; we will keep appending to this the list of block IDs for each file
-            var finalBlockList = new List<string>();
-
-            // check if the blob exists, in which case we need to also get the list of blocks associated with that blob
-            // this will help to skip blocks which were already completed, and thereby help with resume
-            // TODO Block IDs are not unique across files - this will trip up the logic
-            //if (await destBlob.ExistsAsync())
-            //{
-            //    // only get committed blocks to be sure 
-            //    var blockList = await destBlob.DownloadBlockListAsync(BlockListingFilter.Committed, null, null, null);
-            //    destBlockList = blockList.Select(e => e.Name).ToList();
-            //}
-            var blockList = await BlobHelpers.GetBlockListForBlob(destBlob, logger);
-            if (blockList != null)
+            try
             {
-                destBlockList = blockList.Select(b => b.Name).ToList();
-            }
-            else
-            {
-                // TODO this is an error condition, log and exit
-            }
+                var sw = Stopwatch.StartNew();
 
-            // check if there is a specific list of files given by the user, in which case the immediate 'if' code below will be skipped
-            if (sourceFileNames is null || sourceFileNames.Count == 0)
-            {
-                // we have a prefix specified, so get a of blobs with a specific prefix and then add them to a list
-                sourceFileNames = Directory.GetFiles(sourceFolderName, sourceBlobPrefix + "*").ToList();
+                GlobalOptimizations();
 
-                // if the user specified to sort the input blobs (only valid for the prefix case) then we will happily do that!
-                // The gotcha here is that this is a string sort. So if files have names like file_9, file_13, file_6, file_3, file_1
-                // the sort order will result in file_1, file_13, file_3, file_6, file_9. 
-                // To avoid issues like this the user must 0-prefix the numbers embedded in the filenames.
-                if (sortFiles)
+                // TODO check for null from below func
+                // get a reference to the destination blob
+                var destBlob = BlobHelpers.GetBlockBlob(destStorageAccountName,
+                    destStorageContainerName,
+                    destBlobName,
+                    destSAS,
+                    destStorageAccountKey,
+                    destEndpointSuffix,
+                    logger);
+
+                var destBlockList = new List<string>();
+
+                // this will start off as blank; we will keep appending to this the list of block IDs for each file
+                var finalBlockList = new List<string>();
+
+                // check if the blob exists, in which case we need to also get the list of blocks associated with that blob
+                // this will help to skip blocks which were already completed, and thereby help with resume
+                // TODO Block IDs are not unique across files - this will trip up the logic
+                //if (await destBlob.ExistsAsync())
+                //{
+                //    // only get committed blocks to be sure 
+                //    var blockList = await destBlob.DownloadBlockListAsync(BlockListingFilter.Committed, null, null, null);
+                //    destBlockList = blockList.Select(e => e.Name).ToList();
+                //}
+                var blockList = await BlobHelpers.GetBlockListForBlob(destBlob, logger);
+                if (blockList != null)
                 {
-                    sourceFileNames.Sort();
+                    destBlockList = blockList.Select(b => b.Name).ToList();
                 }
-            }
-
-            // iterate through each source file, one at a time.
-            foreach (var sourceFileName in sourceFileNames)
-            {
-                logger.LogInformation("Starting on {sourceFileName}", sourceFileName);
-
-                var fInfo = new FileInfo(sourceFileName);
-
-                // construct the set of "block ranges" by splitting the source files into chunks
-                // of CHUNK_SIZE or the remaining length, as appropriate.
-                var chunkSet = Enumerable.Range(0, (int)(fInfo.Length / CHUNK_SIZE) + 1)
-                    .Select(ci => new FileBlockRange(sourceFileName,
-                    string.Concat(sourceFileName, 
-                        fInfo.Length,
-                        ci),
-                    ci * CHUNK_SIZE,
-                    (ci * CHUNK_SIZE + CHUNK_SIZE > fInfo.Length) ?
-                            fInfo.Length - ci * CHUNK_SIZE :
-                            CHUNK_SIZE
-                    ));
-
-                // add this list of block IDs to the final list
-                finalBlockList.AddRange(chunkSet.Select(e => e.Name));
-
-                // chunkSet is the complete set of BlockRanges which should finally exist
-                // in the destination. However, we need to "subtract" the list of blocks already existing
-                // at the destination (depicted by destBlockList).
-                var blockRangesToBeCopied = chunkSet.Where(e => !destBlockList.Contains(e.Name));
-
-                // call the helper function to actually execute the writes to blob
-                await ProcessBlockRanges(blockRangesToBeCopied, destBlob, calcMD5ForBlock, logger);
-
-                // each iteration (each source file) we will commit an ever-increasing super-set of block IDs
-                // we do this to support "resume" operations later on.
-                // we will only do this if we actually did any work here TODO review
-                if (blockRangesToBeCopied.Count() > 0)
+                else
                 {
-                    // use retry policy which will automatically handle the throttling related StorageExceptions
-                    await BlobHelpers.GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+                    // TODO this is an error condition, log and exit
+                }
+
+                // check if there is a specific list of files given by the user, in which case the immediate 'if' code below will be skipped
+                if (sourceFileNames is null || sourceFileNames.Count == 0)
+                {
+                    // we have a prefix specified, so get a of blobs with a specific prefix and then add them to a list
+                    sourceFileNames = Directory.GetFiles(sourceFolderName, sourceBlobPrefix + "*").ToList();
+
+                    // if the user specified to sort the input blobs (only valid for the prefix case) then we will happily do that!
+                    // The gotcha here is that this is a string sort. So if files have names like file_9, file_13, file_6, file_3, file_1
+                    // the sort order will result in file_1, file_13, file_3, file_6, file_9. 
+                    // To avoid issues like this the user must 0-prefix the numbers embedded in the filenames.
+                    if (sortFiles)
                     {
-                        await destBlob.PutBlockListAsync(finalBlockList);
-                    });
+                        sourceFileNames.Sort();
+                    }
                 }
 
-                Debug.WriteLine($"{DateTime.Now}: END {sourceFileName}");
+                // iterate through each source file, one at a time.
+                foreach (var sourceFileName in sourceFileNames)
+                {
+                    logger.LogDebug("Starting on {sourceFileName}", sourceFileName);
 
-                // TODO optionally allow user to specify extra character(s) to append in between files. This is typically needed when the source files do not have a trailing \n character.
+                    var fInfo = new FileInfo(sourceFileName);
+
+                    // construct the set of "block ranges" by splitting the source files into chunks
+                    // of CHUNK_SIZE or the remaining length, as appropriate.
+                    var chunkSet = Enumerable.Range(0, (int)(fInfo.Length / CHUNK_SIZE) + 1)
+                        .Select(ci => new FileBlockRange(sourceFileName,
+                        string.Concat(sourceFileName,
+                            fInfo.Length,
+                            ci),
+                        ci * CHUNK_SIZE,
+                        (ci * CHUNK_SIZE + CHUNK_SIZE > fInfo.Length) ?
+                                fInfo.Length - ci * CHUNK_SIZE :
+                                CHUNK_SIZE
+                        ));
+
+                    // add this list of block IDs to the final list
+                    finalBlockList.AddRange(chunkSet.Select(e => e.Name));
+
+                    // chunkSet is the complete set of BlockRanges which should finally exist
+                    // in the destination. However, we need to "subtract" the list of blocks already existing
+                    // at the destination (depicted by destBlockList).
+                    var blockRangesToBeCopied = chunkSet.Where(e => !destBlockList.Contains(e.Name));
+
+                    // call the helper function to actually execute the writes to blob
+                    await ProcessBlockRanges(blockRangesToBeCopied, destBlob, calcMD5ForBlock, logger);
+
+                    // each iteration (each source file) we will commit an ever-increasing super-set of block IDs
+                    // we do this to support "resume" operations later on.
+                    // we will only do this if we actually did any work here TODO review
+                    if (blockRangesToBeCopied.Count() > 0)
+                    {
+                        // use retry policy which will automatically handle the throttling related StorageExceptions
+                        await BlobHelpers.GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+                        {
+                            await destBlob.PutBlockListAsync(finalBlockList);
+                        });
+                    }
+
+                    logger.LogDebug($"{DateTime.Now}: END {sourceFileName}");
+
+                    // TODO optionally allow user to specify extra character(s) to append in between files. This is typically needed when the source files do not have a trailing \n character.
+                }
+
+                sw.Stop();
+
+                logger.LogInformation($"filestoblob operation suceeded in {sw.Elapsed.TotalSeconds} seconds.");
+            }
+            catch (StorageException ex)
+            {
+                BlobHelpers.LogStorageException(ex, logger);
+
+                return false;
             }
 
-            // TODO handle failures.
             return true;
         }
 
@@ -496,7 +524,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                 sw.Stop();
                 
                 // TODO fix the logging to be fully relevant
-                logger.LogInformation("{eventType} {duration} {context}", "ProcessBlockRanges", sw.Elapsed, "ProcessFile");
+                logger.LogDebug("{eventType} {duration} {context}", "ProcessBlockRanges", sw.Elapsed, "ProcessFile");
             },
             new ExecutionDataflowBlockOptions()
             {
@@ -534,7 +562,7 @@ namespace Microsoft.Azure.Samples.BlobCat
 
             using (var brData = await currRange.GetBlockRangeData(calcMD5ForBlock, logger))
             {
-                logger.LogInformation($"Putting block {currRange.Name}");
+                logger.LogDebug($"Putting block {currRange.Name}");
 
                 // use retry policy which will automatically handle the throttling related StorageExceptions
                 await BlobHelpers.GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
