@@ -8,6 +8,7 @@ namespace Microsoft.Azure.Samples.BlobCat
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using System.Net.Http;
     using System.Threading.Tasks;
 
     class BlobHelpers
@@ -25,7 +26,9 @@ namespace Microsoft.Azure.Samples.BlobCat
             return (
             "ServerBusy" == errorCode
             || "InternalError" == errorCode
-            || "OperationTimedOut" == errorCode);
+            || "OperationTimedOut" == errorCode
+            || (ex.InnerException is HttpRequestException)            
+            );
         }
 
         /// <summary>
@@ -44,7 +47,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                             // TODO how can the below cast to StorageException be avoided; seems like Polly only allows generic Exception?
                             var ex = genEx as StorageException;
 
-                            LogStorageException(ex, logger);
+                            LogStorageException(ex, logger, true);
                         });
         }
 
@@ -53,13 +56,23 @@ namespace Microsoft.Azure.Samples.BlobCat
         /// </summary>
         /// <param name="ex"></param>
         /// <param name="logger"></param>
-        internal static void LogStorageException(StorageException ex, ILogger logger)
+        internal static void LogStorageException(StorageException ex, ILogger logger, bool retryable)
         {
-            logger.LogError($"StorageException details: {ex.Message} with Error code {ex.RequestInformation.ErrorCode} and Error Message {ex.RequestInformation.ExtendedErrorInformation.ErrorMessage}. Additional details follow:");
+            var exMsg = ex.RequestInformation.ExtendedErrorInformation == null ?
+                ex.RequestInformation.Exception.ToString() : ex.RequestInformation.ExtendedErrorInformation.ErrorMessage;
 
-            foreach (var addDetails in ex.RequestInformation.ExtendedErrorInformation.AdditionalDetails)
+            var errCode = ex.RequestInformation.ErrorCode;
+
+            logger.Log(retryable ? Extensions.Logging.LogLevel.Warning : Extensions.Logging.LogLevel.Error,
+                $"StorageException details: {ex.Message} with Error code {errCode} and Extended Error Message {exMsg}.");
+
+            if (!(ex.RequestInformation.ExtendedErrorInformation is null))
             {
-                logger.LogError($"{addDetails.Key}: {addDetails.Value}");
+                foreach (var addDetails in ex.RequestInformation.ExtendedErrorInformation.AdditionalDetails)
+                {
+                    logger.Log(retryable ? Extensions.Logging.LogLevel.Warning : Extensions.Logging.LogLevel.Error,
+                        $"{addDetails.Key}: {addDetails.Value}");
+                }
             }
 
             logger.LogDebug(ex, "Storage Exception details", null);
@@ -118,19 +131,22 @@ namespace Microsoft.Azure.Samples.BlobCat
                 inEndpointSuffix,
                 logger);
 
-                var blobListing = new List<IListBlobItem>();
-                BlobContinuationToken continuationToken = null;
-
-                // we have a prefix specified, so get a of blobs with a specific prefix and then add them to a list
-                do
+                if (blobContainer != null)
                 {
-                    var response = await blobContainer.ListBlobsSegmentedAsync(inBlobPrefix, true, BlobListingDetails.None, null, continuationToken, null, null);
-                    continuationToken = response.ContinuationToken;
-                    blobListing.AddRange(response.Results);
-                }
-                while (continuationToken != null);
+                    var blobListing = new List<IListBlobItem>();
+                    BlobContinuationToken continuationToken = null;
 
-                retVal = (from b in blobListing.OfType<CloudBlockBlob>() select b.Name).ToList();
+                    // we have a prefix specified, so get a of blobs with a specific prefix and then add them to a list
+                    do
+                    {
+                        var response = await blobContainer.ListBlobsSegmentedAsync(inBlobPrefix, true, BlobListingDetails.None, null, continuationToken, null, null);
+                        continuationToken = response.ContinuationToken;
+                        blobListing.AddRange(response.Results);
+                    }
+                    while (continuationToken != null);
+
+                    retVal = (from b in blobListing.OfType<CloudBlockBlob>() select b.Name).ToList();
+                }
             });
 
             return retVal;

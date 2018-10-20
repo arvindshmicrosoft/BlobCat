@@ -34,17 +34,14 @@
 namespace Microsoft.Azure.Samples.BlobCat
 {
     using Microsoft.Extensions.Logging;
-    using Microsoft.WindowsAzure.Storage;
+    using WindowsAzure.Storage;
     using Microsoft.WindowsAzure.Storage.Blob;
-    using Polly;
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
     using System.Linq;
     using System.Net;
-    using System.Security.Cryptography;
-    using System.Text;
     using System.Text.RegularExpressions;
     using System.Threading;
     using System.Threading.Tasks;
@@ -54,6 +51,10 @@ namespace Microsoft.Azure.Samples.BlobCat
     {
         // currently 100 MB
         private static readonly int CHUNK_SIZE = 100 * 1024 * 1024;
+
+        private static double overallProgress = 0.0;
+
+        private static Mutex mutexForProgress = new Mutex(false);
 
         private static void GlobalOptimizations()
         {
@@ -108,8 +109,15 @@ namespace Microsoft.Azure.Samples.BlobCat
             string destEndpointSuffix,
             string colHeader,
             bool calcMD5ForBlock,
-            ILogger logger)
+            bool overwriteDest,
+            int timeoutSeconds,
+            int maxDOP,
+            bool useRetry,
+            ILogger logger,
+            IProgress<OpProgress> progress)
         {
+            var opProgress = new OpProgress();
+
             try
             {
                 var sw = Stopwatch.StartNew();
@@ -144,16 +152,30 @@ namespace Microsoft.Azure.Samples.BlobCat
                 }
                 else
                 {
-                    logger.LogDebug($"Destination blob {destBlobName} exists; trying to get block listing.");
+                    // support overwrite by deleting the destination blob
+                    if (overwriteDest)
+                    {
+                        logger.LogDebug($"Destination blob {destBlobName} exists but needs to be deleted as overwrite == true.");
 
-                    destBlockList = new List<string>(blockList.Select(b => b.Name));
+                        await destBlob.DeleteAsync();
 
-                    logger.LogDebug($"Destination blob {destBlobName} has {destBlockList.Count} blocks.");
+                        logger.LogDebug($"Destination blob {destBlobName} deleted to prepare for overwrite.");
+                    }
+                    else
+                    {
+                        logger.LogDebug($"Destination blob {destBlobName} exists; trying to get block listing.");
+
+                        destBlockList = new List<string>(blockList.Select(b => b.Name));
+
+                        logger.LogDebug($"Destination blob {destBlobName} has {destBlockList.Count} blocks.");
+                    }
                 }
 
                 // create a place holder for the final block list (to be eventually used for put block list) and pre-populate it with the known list of blocks
                 // already associated with the destination blob
                 var finalBlockList = new List<string>(destBlockList);
+
+                // signal back to the caller with the total block list
 
                 // check if there is a specific list of blobs given by the user, in which case the immediate 'if' code below will be skipped
                 if (sourceBlobNames is null || sourceBlobNames.Count == 0)
@@ -200,7 +222,29 @@ namespace Microsoft.Azure.Samples.BlobCat
                 // now copy in the rest of the "regular" blobs
                 sourceBlobItems.AddRange(from b in sourceBlobNames select new BlobItem { sourceBlobName = b });
 
+                // get block lists for all source blobs in parallel. earlier this was done serially and was found to be bottleneck
+                Parallel.ForEach(sourceBlobItems, tmpBlobItem =>
+                {
+                    tmpBlobItem.blockBlob = tmpBlobItem.useAsString ? null : BlobHelpers.GetBlockBlob(sourceStorageAccountName,
+                        sourceStorageContainerName,
+                        tmpBlobItem.sourceBlobName,
+                        sourceSAS,
+                        sourceStorageAccountKey,
+                        sourceEndpointSuffix,
+                        logger);
+
+                    // first we get the block list of the source blob. we use this to later parallelize the download / copy operation
+                    tmpBlobItem.blockList = BlobHelpers.GetBlockListForBlob(tmpBlobItem.blockBlob, logger).GetAwaiter().GetResult();
+                });
+
+                opProgress.TotalTicks = (from b in sourceBlobItems select b.blockList.Count()).Sum()
+                    + sourceBlobItems.Count;
+
+                progress.Report(opProgress);
+
                 // iterate through each source blob, one at a time.
+                int sourceBlobIndex = 0;
+
                 foreach (var currBlobItem in sourceBlobItems)
                 {
                     var blockRanges = new List<BlockRangeBase>();
@@ -208,15 +252,7 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                     var sourceBlobName = currBlobItem.sourceBlobName;
 
-                    var sourceBlob = currBlobItem.useAsString ? null : BlobHelpers.GetBlockBlob(sourceStorageAccountName,
-                        sourceStorageContainerName,
-                        sourceBlobName,
-                        sourceSAS,
-                        sourceStorageAccountKey,
-                        sourceEndpointSuffix,
-                        logger);
-
-                    if (!currBlobItem.useAsString && sourceBlob is null)
+                    if (!currBlobItem.useAsString && currBlobItem.blockBlob is null)
                     {
                         logger.LogError($"Failed to get reference to source blob {sourceBlobName}, exiting!");
                         return false;
@@ -239,12 +275,11 @@ namespace Microsoft.Azure.Samples.BlobCat
                     }
                     else
                     {
+                        opProgress.StatusMessage = $"Working on {sourceBlobName}";
+
                         logger.LogDebug($"START: {sourceBlobName}");
 
-                        // first we get the block list of the source blob. we use this to later parallelize the download / copy operation
-                        IEnumerable<ListBlockItem> sourceBlockList = await BlobHelpers.GetBlockListForBlob(sourceBlob, logger);
-
-                        if (sourceBlockList is null)
+                        if (currBlobItem.blockList is null)
                         {
                             logger.LogError($"Failed to get block list for source blob {sourceBlobName}; exiting!");
                             return false;
@@ -252,17 +287,17 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                         // in case the source blob is smaller then 256 MB (for latest API) then the blob is stored directly without any block list
                         // so in this case the sourceBlockList is 0-length and we need to fake a BlockListItem as null, which will later be handled below
-                        if (sourceBlockList.Count() == 0 && sourceBlob.Properties.Length > 0)
+                        if (currBlobItem.blockList.Count() == 0 && currBlobItem.blockBlob.Properties.Length > 0)
                         {
                             logger.LogDebug($"Source blob {sourceBlobName} does not have blocks as it is a 'small blob'");
 
                             ListBlockItem fakeBlockItem = null;
-                            sourceBlockList = sourceBlockList.Concat(new[] { fakeBlockItem });
+                            currBlobItem.blockList = currBlobItem.blockList.Concat(new[] { fakeBlockItem });
                         }
 
                         // iterate through the list of blocks and compute their effective offsets in the final file.
                         int chunkIndex = 0;
-                        foreach (var blockListItem in sourceBlockList)
+                        foreach (var blockListItem in currBlobItem.blockList)
                         {
                             if (blockListItem != null)
                             {
@@ -270,12 +305,12 @@ namespace Microsoft.Azure.Samples.BlobCat
                             }
 
                             // handle special case when the sourceBlob was put using PutBlob and has no blocks
-                            var blockLength = blockListItem == null ? sourceBlob.Properties.Length : blockListItem.Length;
+                            var blockLength = blockListItem == null ? currBlobItem.blockBlob.Properties.Length : blockListItem.Length;
 
                             // compute a unique blockId based on blob account + container + blob name (includes path) + block length + block "number"
                             // TODO also consider a fileIndex component, to eventually allow for the same source blob to recur in the list of source blobs
 
-                            var newBlockRange = new BlobBlockRange(sourceBlob,
+                            var newBlockRange = new BlobBlockRange(currBlobItem.blockBlob,
                                 string.Concat(
                                     sourceEndpointSuffix,
                                     sourceStorageAccountName,
@@ -316,12 +351,22 @@ namespace Microsoft.Azure.Samples.BlobCat
                     currentOffset = 0;
 
                     // call the helper function to actually execute the writes to blob
-                    await ProcessBlockRanges(blockRanges, destBlob, calcMD5ForBlock, logger);
+                    await ProcessBlockRanges(blockRanges,
+                        destBlob,
+                        calcMD5ForBlock,
+                        logger,
+                        progress,
+                        opProgress,
+                        (double)sourceBlobIndex / (double)sourceBlobItems.Count * 100.0,
+                        1.0 / (double)sourceBlobItems.Count * 100.0,
+                        timeoutSeconds,
+                        maxDOP,
+                        useRetry);
 
                     // each iteration (each source file) we will commit an ever-increasing super-set of block IDs
                     // we do this to support "resume" operations later on.
                     // we will only do this if we actually did any work here TODO review
-                    if (blockRanges.Count() > 0)
+                    if (blockRanges.Count() > 0 && sourceBlobIndex >= sourceBlobItems.Count - 1)
                     {
                         // use retry policy which will automatically handle the throttling related StorageExceptions
                         await BlobHelpers.GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
@@ -332,16 +377,29 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                     logger.LogDebug($"END: {currBlobItem.sourceBlobName}");
 
+                    // report progress to caller
+                    sourceBlobIndex++;
+
+                    opProgress.Percent = overallProgress;
+                    opProgress.StatusMessage = $"Finished with {currBlobItem.sourceBlobName}";
+
+                    progress.Report(opProgress);
+
                     // TODO optionally allow user to specify extra character(s) to append in between files. This is typically needed when the source files do not have a trailing \n character.
                 }
 
                 sw.Stop();
 
-                logger.LogInformation($"BlobToBlob operation suceeded in {sw.Elapsed.TotalSeconds} seconds.");
+                opProgress.StatusMessage = $"BlobToBlob operation suceeded in {sw.Elapsed.TotalSeconds} seconds.";
+                progress.Report(opProgress);
             }
             catch (StorageException ex)
             {
-                BlobHelpers.LogStorageException(ex, logger);
+                //opProgress.Percent = 100;
+                //opProgress.StatusMessage = "Errors occured. Details in the log.";
+                //progress.Report(opProgress);
+
+                BlobHelpers.LogStorageException(ex, logger, false);
 
                 return false;
             }
@@ -381,8 +439,15 @@ namespace Microsoft.Azure.Samples.BlobCat
             string destEndpointSuffix,
             string colHeader,
             bool calcMD5ForBlock,
-            ILogger logger)
+            int timeoutSeconds,
+            int maxDOP,
+            bool useRetry,
+            ILogger logger,
+            IProgress<OpProgress> progress
+            )
         {
+            var opProgress = new OpProgress();
+
             try
             {
                 var sw = Stopwatch.StartNew();
@@ -468,7 +533,18 @@ namespace Microsoft.Azure.Samples.BlobCat
                     var blockRangesToBeCopied = chunkSet.Where(e => !destBlockList.Contains(e.Name));
 
                     // call the helper function to actually execute the writes to blob
-                    await ProcessBlockRanges(blockRangesToBeCopied, destBlob, calcMD5ForBlock, logger);
+                    // TODO this will be broken right now
+                    await ProcessBlockRanges(blockRangesToBeCopied,
+                        destBlob,
+                        calcMD5ForBlock,
+                        logger,
+                        null,
+                        null,
+                        0,
+                        0,
+                        timeoutSeconds,
+                        maxDOP,
+                        useRetry);
 
                     // each iteration (each source file) we will commit an ever-increasing super-set of block IDs
                     // we do this to support "resume" operations later on.
@@ -493,7 +569,11 @@ namespace Microsoft.Azure.Samples.BlobCat
             }
             catch (StorageException ex)
             {
-                BlobHelpers.LogStorageException(ex, logger);
+                opProgress.Percent = 100;
+                opProgress.StatusMessage = "Errors occured. Details in the log.";
+                progress.Report(opProgress);
+
+                BlobHelpers.LogStorageException(ex, logger, false);
 
                 return false;
             }
@@ -504,36 +584,59 @@ namespace Microsoft.Azure.Samples.BlobCat
         private async static Task<bool> ProcessBlockRanges(IEnumerable<BlockRangeBase> blockRangesToBeCopied,
             CloudBlockBlob destBlob,
             bool calcMD5ForBlock,
-            ILogger logger
-            )
+            ILogger logger,
+            IProgress<OpProgress> progress,
+            OpProgress progressDetails,
+            double baseProgress,
+            double maxProgressPercent,
+            int timeoutSeconds,
+            int maxDOP,
+            bool useRetry)
         {
+            int blockRangesDone = 0;
+
             var actionBlock = new ActionBlock<BlockRangeBase>(
             async (br) =>
             {
                 var sw = Stopwatch.StartNew();
-                try
+                //try
                 {
-                    await ProcessBlockRange(br, destBlob, calcMD5ForBlock, logger);
+                    await ProcessBlockRange(br, destBlob, timeoutSeconds, useRetry, calcMD5ForBlock, logger);
+
+                    Interlocked.Increment(ref blockRangesDone);
+
+                    // here we increment the progress and update it
+                    //mutexForProgress.WaitOne();
+
+                    overallProgress = baseProgress + (double)blockRangesDone / (double)blockRangesToBeCopied.Count() * maxProgressPercent;
+
+                    progressDetails.Percent = overallProgress;
+
+                    //mutexForProgress.ReleaseMutex();
+
+                    progress.Report(progressDetails);
                 }
                 // TODO should not be catching all exceptions
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Could not process block range");
-                }
+                //catch (Exception ex)
+                //{
+                //    logger.LogError(ex, "Could not process block range");
+                //}
 
                 sw.Stop();
-                
+
                 // TODO fix the logging to be fully relevant
-                logger.LogDebug("{eventType} {duration} {context}", "ProcessBlockRanges", sw.Elapsed, "ProcessFile");
+                logger.LogDebug("{eventType} {duration} {context}", "ProcessBlockRanges", sw.Elapsed, $"ProcessBlockRange {br.Name} ended.");
             },
             new ExecutionDataflowBlockOptions()
             {
-                MaxDegreeOfParallelism = Environment.ProcessorCount * 8
+                MaxDegreeOfParallelism = maxDOP // Environment.ProcessorCount * 8
             });
 
             foreach (var br in blockRangesToBeCopied)
             {
                 await actionBlock.SendAsync(br);
+
+                blockRangesDone++;
             }
 
             actionBlock.Complete();
@@ -554,21 +657,31 @@ namespace Microsoft.Azure.Samples.BlobCat
         private async static Task<bool> ProcessBlockRange(
             BlockRangeBase currRange, 
             CloudBlockBlob destBlob,
+            int timeoutSeconds,
+            bool useRetry,
             bool calcMD5ForBlock,
             ILogger logger)
         {
             //logger.LogInformation("{fileName} {segmentOffset} {action}",
             //    sourceFileName, currRange.StartOffset, "START");
 
-            using (var brData = await currRange.GetBlockRangeData(calcMD5ForBlock, logger))
+            using (var brData = await currRange.GetBlockRangeData(calcMD5ForBlock, timeoutSeconds, logger))
             {
                 logger.LogDebug($"Putting block {currRange.Name}");
 
                 // use retry policy which will automatically handle the throttling related StorageExceptions
                 await BlobHelpers.GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
                     {
+                        var blobReqOpts = new BlobRequestOptions()
+                        {
+                            ServerTimeout = new TimeSpan(0, 0, timeoutSeconds)
+                        };
+
+                        if (!useRetry) blobReqOpts.RetryPolicy = new WindowsAzure.Storage.RetryPolicies.NoRetry();
+
                         // reset the memory stream again to 0 and then call Azure Storage to put this as a block with the given block ID and MD5 hash
-                        await destBlob.PutBlockAsync(currRange.Name, brData.MemStream, brData.Base64EncodedMD5Checksum);
+                        await destBlob.PutBlockAsync(currRange.Name, brData.MemStream, brData.Base64EncodedMD5Checksum,
+                                        null, blobReqOpts, null);
                     });
             }
 

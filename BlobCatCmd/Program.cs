@@ -38,7 +38,9 @@ namespace Microsoft.Azure.Samples.BlobCat
     using Microsoft.Extensions.Logging;
     using Microsoft.Extensions.Logging.Console;
     using Microsoft.Extensions.DependencyInjection;
+    using NetEscapades.Extensions.Logging.RollingFile;
     using System;
+    using ShellProgressBar;
 
     class Program
     {
@@ -50,64 +52,114 @@ namespace Microsoft.Azure.Samples.BlobCat
         static int Main(string[] args)
         {
             // create a logger instance
-            var services = new ServiceCollection().AddLogging(config => {
-                config.AddConsole().AddDebug();
-
-                if (args.Contains("--Debug"))
+            var services = new ServiceCollection().AddLogging(config =>
+            {
+                config.AddFile(options =>
                 {
-                    config.SetMinimumLevel(LogLevel.Debug);
-                }
+                    options.FlushPeriod = new TimeSpan(0, 0, 1);
+                    options.FileName = "diagnostics-"; // The log file prefixes
+                    options.FileSizeLimit = 20 * 1024 * 1024; // The maximum log file size (20MB here)
+
+                    if (args.Contains("--Debug"))
+                    {
+                        config.SetMinimumLevel(LogLevel.Debug);
+                    }
+                    else
+                    {
+                        config.SetMinimumLevel(LogLevel.Information);
+                    }
+                });
             }).BuildServiceProvider();
 
-            var myLogger = services.GetRequiredService<ILogger<Program>>();
+            var myLogger = services.GetService<ILoggerFactory>().CreateLogger("BlobCatCmd");
+            //var myLogger = loggerFactory.CreateLogger("BlobCatCmd");
 
             var parseResult = Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args);
 
+            ProgressBar pbar = null;
+
+            // check for Console.IsInputRedirected || Console.IsOutputRedirected and if so then do not use progressbar
+            var progress = new Progress<OpProgress>(opProgress =>
+            {
+                if (pbar is null)
+                {
+                    if (opProgress.TotalTicks > 0)
+                    {
+                        pbar = new ProgressBar(opProgress.TotalTicks, "Starting operation", new ProgressBarOptions
+                        {
+                            ProgressCharacter = '.',
+                            ProgressBarOnBottom = true,
+                            EnableTaskBarProgress = true,
+                            DisplayTimeInRealTime = false
+                        });
+                    }
+                }
+
+                // Console.WriteLine(percent);
+                if (pbar != null)
+                {
+                    pbar.Tick(opProgress.StatusMessage);
+                }
+                //myLogger.LogInformation($"Operation {opProgress.Percent}% complete; currently working on file {opProgress.StatusMessage}");
+            });
+
             var retVal = parseResult.MapResult(
-                (ConcatBlobOptions opts) =>
-                {
-                    return BlobCatEngine.BlobToBlob(
-                        opts.SourceAccountName,
-                        opts.SourceContainer,
-                        opts.SourceKey,
-                        opts.SourceSAS,
-                        opts.SourceFilePrefix,
-                        opts.SourceEndpointSuffix,
-                        opts.SortFilenames,
-                        opts.SourceFiles.ToList(),
-                        opts.DestAccountName,
-                        opts.DestKey,
-                        opts.DestSAS,
-                        opts.DestContainer,
-                        opts.DestFilename,
-                        opts.DestEndpointSuffix,
-                        opts.ColHeader,
-                        opts.CalcMD5ForBlock,
-                        myLogger).GetAwaiter().GetResult() ? 0 : 1;
-                },
-                (FilesToBlobOptions opts) => 
-                {
-                    return BlobCatEngine.DiskToBlob(
-                        opts.SourceFolder,
-                        opts.SourceFilePrefix,
-                        opts.SortFilenames,
-                        opts.SourceFiles.ToList(),
-                        opts.DestAccountName,
-                        opts.DestKey,
-                        opts.DestSAS,
-                        opts.DestContainer,
-                        opts.DestFilename,
-                        opts.DestEndpointSuffix,
-                        opts.ColHeader,
-                        opts.CalcMD5ForBlock,
-                        myLogger
-                        ).GetAwaiter().GetResult() ? 0 : 1;
-                },
-                errs => 1);
+            (ConcatBlobOptions opts) =>
+            {
+                return BlobCatEngine.BlobToBlob(
+                    opts.SourceAccountName,
+                    opts.SourceContainer,
+                    opts.SourceKey,
+                    opts.SourceSAS,
+                    opts.SourceFilePrefix,
+                    opts.SourceEndpointSuffix,
+                    opts.SortFilenames,
+                    opts.SourceFiles.ToList(),
+                    opts.DestAccountName,
+                    opts.DestKey,
+                    opts.DestSAS,
+                    opts.DestContainer,
+                    opts.DestFilename,
+                    opts.DestEndpointSuffix,
+                    opts.ColHeader,
+                    opts.CalcMD5ForBlock,
+                    opts.Overwrite,
+                    opts.ServerTimeout,
+                    opts.MaxDOP,
+                    opts.UseRetry,
+                    myLogger,
+                    progress).GetAwaiter().GetResult() ? 0 : 1;
+            },
+            (FilesToBlobOptions opts) =>
+            {
+                return BlobCatEngine.DiskToBlob(
+                    opts.SourceFolder,
+                    opts.SourceFilePrefix,
+                    opts.SortFilenames,
+                    opts.SourceFiles.ToList(),
+                    opts.DestAccountName,
+                    opts.DestKey,
+                    opts.DestSAS,
+                    opts.DestContainer,
+                    opts.DestFilename,
+                    opts.DestEndpointSuffix,
+                    opts.ColHeader,
+                    opts.CalcMD5ForBlock,
+                    opts.ServerTimeout,
+                    opts.MaxDOP,
+                    opts.UseRetry,
+                    myLogger,
+                    progress
+                    ).GetAwaiter().GetResult() ? 0 : 1;
+            },
+            errs => 1);
 
             // this seems to be required to consistently flush logger output to the console before exiting! 
             // see https://github.com/aspnet/Logging/issues/631 for reference
             ((IDisposable)services)?.Dispose();
+
+            // TODO fix - this is being introduced to allow the file logger to flush buffers before the app exits
+            System.Threading.Thread.Sleep(10000);
 
             return retVal;
         }

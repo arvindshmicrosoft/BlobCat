@@ -34,6 +34,7 @@
 namespace Microsoft.Azure.Samples.BlobCat
 {
     using CommandLine;
+    using System;
     using System.Collections.Generic;
 
     [Verb("concatblob", HelpText = "Concatenates a set of blobs into a single blob.")]
@@ -87,8 +88,20 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("CalcMD5ForBlock", Default = false, Required = false, HelpText = "(true | false) Whether to sort the input file names")]
         public bool CalcMD5ForBlock { get; set; }
 
+        [Option("Overwrite", Default = false, Required = false, HelpText = "(true | false) Overwrite the destination blob")]
+        public bool Overwrite { get; set; }
+
         [Option("Debug", Default = false, Required = false, HelpText = "(true | false) Include debug output")]
         public bool DebugOutput { get; set; }
+
+        [Option("ServerTimeout", Default = 120, Required = false, HelpText = "ServerTimeout in seconds")]
+        public int ServerTimeout { get; set; }
+
+        [Option("MaxDOP", Default = 8, Required = false, HelpText = "Number of parallel tasks to use for concatenation (default 8)")]
+        public int MaxDOP { get; set; }
+
+        [Option("UseRetry", Default = true, Required = false, HelpText = "Set this to false to not use the Azure Storage inbuilt retry.")]
+        public bool UseRetry { get; set; }
     }
 
     [Verb("filestoblob", HelpText = "Concatenates a set of on-disk files into a single blob.")]
@@ -130,7 +143,19 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("CalcMD5ForBlock", Default = false, Required = false, HelpText = "(true | false) Whether to sort the input file names")]
         public bool CalcMD5ForBlock { get; set; }
 
+        [Option("Overwrite", Default = false, Required = false, HelpText = "(true | false) Overwrite the destination blob")]
+        public bool Overwrite { get; set; }
+
         [Option("Debug", Default = false, Required = false, HelpText = "(true | false) Include debug output")]
         public bool DebugOutput { get; set; }
+
+        [Option("ServerTimeout", Default = 120, Required = false, HelpText = "ServerTimeout in seconds")]
+        public int ServerTimeout { get; set; }
+
+        [Option("MaxDOP", Default = 8, Required = false, HelpText = "Number of parallel tasks to use for concatenation (default 8)")]
+        public int MaxDOP { get; set; }
+
+        [Option("UseRetry", Default = true, Required = false, HelpText = "Set this to false to not use the Azure Storage inbuilt retry.")]
+        public bool UseRetry { get; set; }
     }
 }

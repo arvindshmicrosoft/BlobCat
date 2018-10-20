@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.WindowsAzure.Storage.Blob;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -8,5 +9,7 @@ namespace Microsoft.Azure.Samples.BlobCat
     {
         internal bool useAsString = false;
         internal string sourceBlobName;
+        internal CloudBlockBlob blockBlob;
+        internal IEnumerable<ListBlockItem> blockList = new List<ListBlockItem>();
     }
 }

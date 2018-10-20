@@ -31,7 +31,7 @@ namespace Microsoft.Azure.Samples.BlobCat
         internal long Length;
         internal string Name;
                 
-        internal async virtual Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, ILogger logger)
+        internal async virtual Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, ILogger logger)
         {
             // TODO in all derived classes we need to check for 0-length block ranges
             return null;
@@ -88,7 +88,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             StartOffset = startOffset;
         }
 
-        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, ILogger logger)
+        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, ILogger logger)
         {
             // TODO logging
             var backingArray = new byte[this.Length];
@@ -127,7 +127,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             Length = blockLength;
         }
 
-        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, ILogger logger)
+        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, ILogger logger)
         {
             BlockRangeData retVal = null;
 
@@ -137,7 +137,16 @@ namespace Microsoft.Azure.Samples.BlobCat
                 // we do not wrap this around in a 'using' block because the caller will be calling Dispose() on the memory stream
                 var memStream = new MemoryStream((int)this.Length);
 
-                await this.sourceBlob.DownloadRangeToStreamAsync(memStream, this.StartOffset, this.Length);
+                await this.sourceBlob.DownloadRangeToStreamAsync(memStream,
+                    this.StartOffset,
+                    this.Length,
+                    null,
+                    new BlobRequestOptions()
+                    {
+                        RetryPolicy = new WindowsAzure.Storage.RetryPolicies.NoRetry(),
+                        ServerTimeout = new TimeSpan(0, 0, timeoutSeconds)
+                    },
+                    null);
 
                 var encodedChecksum = calcMD5ForBlock ? this.ComputeChecksumFromStream(memStream) : null;
 
@@ -165,7 +174,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             ComputeBlockId(hashBasis);
         }
 
-        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, ILogger logger)
+        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, ILogger logger)
         {
             // TODO logging
 
