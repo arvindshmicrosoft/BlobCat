@@ -593,7 +593,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             int maxDOP,
             bool useRetry)
         {
-            int blockRangesDone = 0;
+            // int blockRangesDone = 0;
 
             var actionBlock = new ActionBlock<BlockRangeBase>(
             async (br) =>
@@ -603,14 +603,13 @@ namespace Microsoft.Azure.Samples.BlobCat
                 {
                     await ProcessBlockRange(br, destBlob, timeoutSeconds, useRetry, calcMD5ForBlock, logger);
 
-                    Interlocked.Increment(ref blockRangesDone);
+                    // Interlocked.Increment(ref blockRangesDone);
 
                     // here we increment the progress and update it
                     //mutexForProgress.WaitOne();
 
-                    overallProgress = baseProgress + (double)blockRangesDone / (double)blockRangesToBeCopied.Count() * maxProgressPercent;
-
-                    progressDetails.Percent = overallProgress;
+                    // overallProgress = baseProgress + (double)blockRangesDone / (double)blockRangesToBeCopied.Count() * maxProgressPercent;
+                    // progressDetails.Percent = overallProgress;
 
                     //mutexForProgress.ReleaseMutex();
 
@@ -636,12 +635,20 @@ namespace Microsoft.Azure.Samples.BlobCat
             {
                 await actionBlock.SendAsync(br);
 
-                blockRangesDone++;
+                logger.LogDebug($"Sent block {br.Name} to the dataflow action block");
+
+                // blockRangesDone++;
             }
+
+            logger.LogDebug($"About to signal dataflow action block");
 
             actionBlock.Complete();
 
+            logger.LogDebug($"Signalled dataflow action block");
+
             await actionBlock.Completion;
+
+            logger.LogDebug($"Dataflow action block completed.");
 
             return true;
         }

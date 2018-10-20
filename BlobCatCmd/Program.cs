@@ -36,11 +36,10 @@ namespace Microsoft.Azure.Samples.BlobCat
     using CommandLine;
     using System.Linq;
     using Microsoft.Extensions.Logging;
-    using Microsoft.Extensions.Logging.Console;
-    using Microsoft.Extensions.DependencyInjection;
-    using NetEscapades.Extensions.Logging.RollingFile;
     using System;
     using ShellProgressBar;
+    using System.Reflection;
+    using System.IO;
 
     class Program
     {
@@ -52,27 +51,12 @@ namespace Microsoft.Azure.Samples.BlobCat
         static int Main(string[] args)
         {
             // create a logger instance
-            var services = new ServiceCollection().AddLogging(config =>
-            {
-                config.AddFile(options =>
-                {
-                    options.FlushPeriod = new TimeSpan(0, 0, 1);
-                    options.FileName = "diagnostics-"; // The log file prefixes
-                    options.FileSizeLimit = 20 * 1024 * 1024; // The maximum log file size (20MB here)
+            var logFilePath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
+                "log_{Date}.txt");
 
-                    if (args.Contains("--Debug"))
-                    {
-                        config.SetMinimumLevel(LogLevel.Debug);
-                    }
-                    else
-                    {
-                        config.SetMinimumLevel(LogLevel.Information);
-                    }
-                });
-            }).BuildServiceProvider();
+            var loggerFactory = new LoggerFactory().AddFile(logFilePath, args.Contains("--Debug") ? LogLevel.Debug : LogLevel.Information);
 
-            var myLogger = services.GetService<ILoggerFactory>().CreateLogger("BlobCatCmd");
-            //var myLogger = loggerFactory.CreateLogger("BlobCatCmd");
+            var myLogger = loggerFactory.CreateLogger("BlobCatCmd");
 
             var parseResult = Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args);
 
@@ -153,13 +137,6 @@ namespace Microsoft.Azure.Samples.BlobCat
                     ).GetAwaiter().GetResult() ? 0 : 1;
             },
             errs => 1);
-
-            // this seems to be required to consistently flush logger output to the console before exiting! 
-            // see https://github.com/aspnet/Logging/issues/631 for reference
-            ((IDisposable)services)?.Dispose();
-
-            // TODO fix - this is being introduced to allow the file logger to flush buffers before the app exits
-            System.Threading.Thread.Sleep(10000);
 
             return retVal;
         }
