@@ -372,7 +372,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                     // each iteration (each source file) we will commit an ever-increasing super-set of block IDs
                     // we do this to support "resume" operations later on.
                     // we will only do this if we actually did any work here TODO review
-                    if (blockRanges.Count() > 0 && sourceBlobIndex >= sourceBlobItems.Count - 1)
+                    if (blockRanges.Count() > 0)
                     {
                         // use retry policy which will automatically handle the throttling related StorageExceptions
                         await BlobHelpers.GetStorageRetryPolicy($"PutBlockListAsync for blob {currBlobItem.sourceBlobName}", logger).ExecuteAsync(async () =>
@@ -634,10 +634,12 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                     progress.Report(progressDetails);
                 }
-                // TODO should not be catching all exceptions
+                // TODO see if there is a better way
                 catch (Exception ex)
                 {
                     logger.LogError(ex, $"Could not process range with block ID {br.Name}");
+
+                    allOK = false;
                 }
 
                 sw.Stop();
@@ -723,7 +725,10 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                         if (!useRetry) blobReqOpts.RetryPolicy = new WindowsAzure.Storage.RetryPolicies.NoRetry();
 
-                        // reset the memory stream again to 0 and then call Azure Storage to put this as a block with the given block ID and MD5 hash
+                        // reset the memory stream again to 0
+                        brData.MemStream.Position = 0;
+
+                        // and then call Azure Storage to put this as a block with the given block ID and MD5 hash
                         await destBlob.PutBlockAsync(currRange.Name, brData.MemStream, brData.Base64EncodedMD5Checksum,
                                         null, blobReqOpts, null);
 

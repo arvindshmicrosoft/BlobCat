@@ -138,6 +138,12 @@ namespace Microsoft.Azure.Samples.BlobCat
             },
             errs => 1);
 
+            if (retVal != 0)
+            {
+                // allow some time for logs to flush
+                System.Threading.Thread.Sleep(TimeSpan.FromSeconds(10));
+            }
+
             return retVal;
         }
     }    

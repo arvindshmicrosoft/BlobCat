@@ -7,6 +7,7 @@ namespace Microsoft.Azure.Samples.BlobCat
     using Polly;
     using System;
     using System.Collections.Generic;
+    using System.IO;
     using System.Linq;
     using System.Net.Http;
     using System.Threading.Tasks;
@@ -27,7 +28,10 @@ namespace Microsoft.Azure.Samples.BlobCat
             "ServerBusy" == errorCode
             || "InternalError" == errorCode
             || "OperationTimedOut" == errorCode
-            || (ex.InnerException is HttpRequestException)            
+            || (ex.InnerException is HttpRequestException)
+            || (ex.InnerException is OperationCanceledException)
+            || (ex.InnerException is TimeoutException)
+            || (ex.InnerException is IOException)
             );
         }
 

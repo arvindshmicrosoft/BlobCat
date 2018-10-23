@@ -134,49 +134,36 @@ namespace Microsoft.Azure.Samples.BlobCat
             // use retry policy which will automatically handle the throttling related StorageExceptions
             await BlobHelpers.GetStorageRetryPolicy($"GetBlockRangeData for source blob {this.sourceBlob.Name} corresponding to block Id {this.Name}", logger).ExecuteAsync(async () =>
             {
-                bool exOccured = false;
-
                 // we do not wrap this around in a 'using' block because the caller will be calling Dispose() on the memory stream
                 var memStream = new MemoryStream((int)this.Length);
 
                 logger.LogDebug($"Inside GetBlockRangeData; about to call DownloadRangeToStreamAsync for {this.Name}");
 
-                try
-                {
-                    await this.sourceBlob.DownloadRangeToStreamAsync(memStream,
-                        this.StartOffset,
-                        this.Length,
-                        null,
-                        new BlobRequestOptions()
-                        {
+                await this.sourceBlob.DownloadRangeToStreamAsync(memStream,
+                    this.StartOffset,
+                    this.Length,
+                    null,
+                    new BlobRequestOptions()
+                    {
                             // TODO should retry
                             RetryPolicy = new WindowsAzure.Storage.RetryPolicies.NoRetry(),
-                            ServerTimeout = TimeSpan.FromSeconds(timeoutSeconds),
-                            MaximumExecutionTime = TimeSpan.FromSeconds(timeoutSeconds)
-                        },
-                        null);
-                }
-                catch(Exception ex)
-                {
-                    logger.LogCritical(ex, $"Unhandled exception in DownloadRangeToStreamAsync for source blob {this.sourceBlob.Name} corresponding to block Id {this.Name}", null);
-                    exOccured = true;
-                }
+                        ServerTimeout = TimeSpan.FromSeconds(timeoutSeconds),
+                        MaximumExecutionTime = TimeSpan.FromSeconds(timeoutSeconds)
+                    },
+                    null);
 
                 logger.LogDebug($"Inside GetBlockRangeData; finished DownloadRangeToStreamAsync for {this.Name}");
 
-                if (!exOccured)
+                var encodedChecksum = calcMD5ForBlock ? this.ComputeChecksumFromStream(memStream) : null;
+
+                // reset the stream position back to 0
+                memStream.Position = 0;
+
+                retVal = new BlockRangeData()
                 {
-                    var encodedChecksum = calcMD5ForBlock ? this.ComputeChecksumFromStream(memStream) : null;
-
-                    // reset the stream position back to 0
-                    memStream.Position = 0;
-
-                    retVal = new BlockRangeData()
-                    {
-                        MemStream = memStream,
-                        Base64EncodedMD5Checksum = encodedChecksum
-                    };
-                }
+                    MemStream = memStream,
+                    Base64EncodedMD5Checksum = encodedChecksum
+                };
             });
 
             return retVal;
