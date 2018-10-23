@@ -351,7 +351,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                     currentOffset = 0;
 
                     // call the helper function to actually execute the writes to blob
-                    await ProcessBlockRanges(blockRanges,
+                    var processBRStatus = await ProcessBlockRanges(blockRanges,
                         destBlob,
                         calcMD5ForBlock,
                         logger,
@@ -363,13 +363,19 @@ namespace Microsoft.Azure.Samples.BlobCat
                         maxDOP,
                         useRetry);
 
+                    if (!processBRStatus)
+                    {
+                        logger.LogError($"One or more errors encountered when calling ProcessBlockRanges for source blob {sourceBlobName}; exiting!");
+                        return false;
+                    }
+
                     // each iteration (each source file) we will commit an ever-increasing super-set of block IDs
                     // we do this to support "resume" operations later on.
                     // we will only do this if we actually did any work here TODO review
                     if (blockRanges.Count() > 0 && sourceBlobIndex >= sourceBlobItems.Count - 1)
                     {
                         // use retry policy which will automatically handle the throttling related StorageExceptions
-                        await BlobHelpers.GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+                        await BlobHelpers.GetStorageRetryPolicy($"PutBlockListAsync for blob {currBlobItem.sourceBlobName}", logger).ExecuteAsync(async () =>
                         {
                             await destBlob.PutBlockListAsync(finalBlockList);
                         });
@@ -399,7 +405,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                 //opProgress.StatusMessage = "Errors occured. Details in the log.";
                 //progress.Report(opProgress);
 
-                BlobHelpers.LogStorageException(ex, logger, false);
+                BlobHelpers.LogStorageException("Unhandled exception in BlobToBlob", ex, logger, false);
 
                 return false;
             }
@@ -552,7 +558,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                     if (blockRangesToBeCopied.Count() > 0)
                     {
                         // use retry policy which will automatically handle the throttling related StorageExceptions
-                        await BlobHelpers.GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+                        await BlobHelpers.GetStorageRetryPolicy($"PutBlockListAsync for file {sourceFileName}", logger).ExecuteAsync(async () =>
                         {
                             await destBlob.PutBlockListAsync(finalBlockList);
                         });
@@ -573,7 +579,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                 opProgress.StatusMessage = "Errors occured. Details in the log.";
                 progress.Report(opProgress);
 
-                BlobHelpers.LogStorageException(ex, logger, false);
+                BlobHelpers.LogStorageException("Unhandled exception in DiskToBlob", ex, logger, false);
 
                 return false;
             }
@@ -595,13 +601,26 @@ namespace Microsoft.Azure.Samples.BlobCat
         {
             // int blockRangesDone = 0;
 
+            bool allOK = true;
+
             var actionBlock = new ActionBlock<BlockRangeBase>(
             async (br) =>
             {
                 var sw = Stopwatch.StartNew();
-                //try
+                try
                 {
-                    await ProcessBlockRange(br, destBlob, timeoutSeconds, useRetry, calcMD5ForBlock, logger);
+                    logger.LogDebug($"Inside the action block, before calling ProcessBlockRange for {br.Name}");
+
+                    var brStatus = await ProcessBlockRange(br, destBlob, timeoutSeconds, useRetry, calcMD5ForBlock, logger);
+
+                    if (!brStatus)
+                    {
+                        allOK = false;
+                    }
+                    
+                    logger.LogDebug($"Inside the action block, after calling ProcessBlockRange for {br.Name} with retval {brStatus}");
+
+                    // TODO if brStatus is false, most likely the inner exceptions would have already been thrown but perhaps be defensive and we have to exit somehow because this means something went wrong.
 
                     // Interlocked.Increment(ref blockRangesDone);
 
@@ -616,10 +635,10 @@ namespace Microsoft.Azure.Samples.BlobCat
                     progress.Report(progressDetails);
                 }
                 // TODO should not be catching all exceptions
-                //catch (Exception ex)
-                //{
-                //    logger.LogError(ex, "Could not process block range");
-                //}
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, $"Could not process range with block ID {br.Name}");
+                }
 
                 sw.Stop();
 
@@ -628,7 +647,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             },
             new ExecutionDataflowBlockOptions()
             {
-                MaxDegreeOfParallelism = maxDOP // Environment.ProcessorCount * 8
+                MaxDegreeOfParallelism = maxDOP
             });
 
             foreach (var br in blockRangesToBeCopied)
@@ -644,13 +663,14 @@ namespace Microsoft.Azure.Samples.BlobCat
 
             actionBlock.Complete();
 
-            logger.LogDebug($"Signalled dataflow action block");
+            logger.LogDebug($"Signaled dataflow action block");
 
             await actionBlock.Completion;
 
             logger.LogDebug($"Dataflow action block completed.");
 
-            return true;
+            // TODO how to check the inner bool retVal and surface it here
+            return allOK;
         }
 
         /// <summary>
@@ -671,17 +691,34 @@ namespace Microsoft.Azure.Samples.BlobCat
         {
             //logger.LogInformation("{fileName} {segmentOffset} {action}",
             //    sourceFileName, currRange.StartOffset, "START");
+            logger.LogDebug($"Started ProcessBlockRange for {currRange.Name}");
 
             using (var brData = await currRange.GetBlockRangeData(calcMD5ForBlock, timeoutSeconds, logger))
             {
-                logger.LogDebug($"Putting block {currRange.Name}");
+                var brDataIsNull = (brData is null) ? "null" : "valid";
+
+                logger.LogDebug($"GetBlockRangeData was called for block {currRange.Name} and returned brData {brDataIsNull}");
+
+                if (brData is null)
+                {
+                    logger.LogDebug($"Returning false from GetBlockRangeData for block {currRange.Name} as brData was {brDataIsNull}");
+
+                    return false;
+                }
+
+                logger.LogDebug($"Inside ProcessBlockRange, about to start the PutBlockAsync action for {currRange.Name}");
 
                 // use retry policy which will automatically handle the throttling related StorageExceptions
-                await BlobHelpers.GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+                await BlobHelpers.GetStorageRetryPolicy($"PutBlockAsync for block {currRange.Name}", logger).ExecuteAsync(async () =>
                     {
+                        logger.LogDebug($"Before PutBlockAsync for {currRange.Name}");
+
                         var blobReqOpts = new BlobRequestOptions()
                         {
-                            ServerTimeout = new TimeSpan(0, 0, timeoutSeconds)
+                            // TODO should retry
+                            RetryPolicy = new WindowsAzure.Storage.RetryPolicies.NoRetry(),
+                            ServerTimeout = TimeSpan.FromSeconds(timeoutSeconds),
+                            MaximumExecutionTime = TimeSpan.FromSeconds(timeoutSeconds)
                         };
 
                         if (!useRetry) blobReqOpts.RetryPolicy = new WindowsAzure.Storage.RetryPolicies.NoRetry();
@@ -689,7 +726,11 @@ namespace Microsoft.Azure.Samples.BlobCat
                         // reset the memory stream again to 0 and then call Azure Storage to put this as a block with the given block ID and MD5 hash
                         await destBlob.PutBlockAsync(currRange.Name, brData.MemStream, brData.Base64EncodedMD5Checksum,
                                         null, blobReqOpts, null);
+
+                        logger.LogDebug($"Finished PutBlockAsync for {currRange.Name}");
                     });
+
+                logger.LogDebug($"Finished ProcessBlockRange for {currRange.Name}");
             }
 
             return true;

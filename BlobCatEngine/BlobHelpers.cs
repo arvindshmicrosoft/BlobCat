@@ -35,7 +35,7 @@ namespace Microsoft.Azure.Samples.BlobCat
         /// Wrapper to centralize the storage retry policy definition; this is used in multiple places in the code
         /// </summary>
         /// <returns></returns>
-        internal static Polly.Retry.RetryPolicy GetStorageRetryPolicy(ILogger logger)
+        internal static Polly.Retry.RetryPolicy GetStorageRetryPolicy(string execContext, ILogger logger)
         {
             return Policy.Handle<StorageException>(ex => IsStorageExceptionRetryable(ex))
                     // TODO make retry count and sleep configurable???
@@ -47,7 +47,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                             // TODO how can the below cast to StorageException be avoided; seems like Polly only allows generic Exception?
                             var ex = genEx as StorageException;
 
-                            LogStorageException(ex, logger, true);
+                            LogStorageException(execContext, ex, logger, true);
                         });
         }
 
@@ -56,7 +56,7 @@ namespace Microsoft.Azure.Samples.BlobCat
         /// </summary>
         /// <param name="ex"></param>
         /// <param name="logger"></param>
-        internal static void LogStorageException(StorageException ex, ILogger logger, bool retryable)
+        internal static void LogStorageException(string context, StorageException ex, ILogger logger, bool retryable)
         {
             var exMsg = ex.RequestInformation.ExtendedErrorInformation == null ?
                 ex.RequestInformation.Exception.ToString() : ex.RequestInformation.ExtendedErrorInformation.ErrorMessage;
@@ -64,7 +64,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             var errCode = ex.RequestInformation.ErrorCode;
 
             logger.Log(retryable ? Extensions.Logging.LogLevel.Warning : Extensions.Logging.LogLevel.Error,
-                $"StorageException details: {ex.Message} with Error code {errCode} and Extended Error Message {exMsg}.");
+                $"StorageException occured in context {context}. Exception message is {ex.Message} with Error code {errCode} and Extended Error Message {exMsg}.");
 
             if (!(ex.RequestInformation.ExtendedErrorInformation is null))
             {
@@ -75,7 +75,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                 }
             }
 
-            logger.LogDebug(ex, "Storage Exception details", null);
+            logger.LogDebug(ex, $"Storage Exception details for context {context}", null);
 
             return;
         }
@@ -85,7 +85,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             IEnumerable<ListBlockItem> retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
-            await GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+            await GetStorageRetryPolicy($"DownloadBlockListAsync for blob {destBlob.Name}", logger).ExecuteAsync(async () =>
             {
                 if (!await destBlob.ExistsAsync())
                 {
@@ -122,7 +122,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             List<string> retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
-            await GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+            await GetStorageRetryPolicy($"ListBlobsSegmentedAsync for blob prefix {inBlobPrefix}", logger).ExecuteAsync(async () =>
             {
                 var blobContainer = GetBlobContainerReference(inStorageAccountName,
                 inStorageContainerName,
@@ -174,7 +174,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             CloudBlockBlob retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
-            GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+            GetStorageRetryPolicy($"GetBlockBlobReference for {inBlobName}", logger).ExecuteAsync(async () =>
             {
                 var blobContainer = GetBlobContainerReference(inStorageAccountName,
                 inStorageContainerName,
@@ -207,7 +207,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             CloudBlobContainer retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
-            GetStorageRetryPolicy(logger).ExecuteAsync(async () =>
+            GetStorageRetryPolicy($"GetContainerReference for container {inStorageContainerName}", logger).ExecuteAsync(async () =>
             {
                 var typeOfinCredential = string.IsNullOrEmpty(inSAS) ? "AccountKey" : "SharedAccessSignature";
                 var inCredential = string.IsNullOrEmpty(inSAS) ? inStorageAccountKey : inSAS;
