@@ -7,8 +7,6 @@ namespace Microsoft.Azure.Samples.BlobCat
 {
     class BlobItem
     {
-        internal bool useAsString = false;
-        internal string sourceBlobName;
         internal CloudBlockBlob blockBlob;
         internal IEnumerable<ListBlockItem> blockList = new List<ListBlockItem>();
     }

@@ -30,6 +30,7 @@ namespace Microsoft.Azure.Samples.BlobCat
         internal long StartOffset;
         internal long Length;
         internal string Name;
+        internal string Parent;
                 
         internal async virtual Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, ILogger logger)
         {
@@ -78,11 +79,9 @@ namespace Microsoft.Azure.Samples.BlobCat
 
     class FileBlockRange : BlockRangeBase
     {
-        private string sourceFileName;
-
         internal FileBlockRange(string inFilename, string hashBasis, long startOffset, long length)
         {
-            sourceFileName = inFilename;
+            Parent = inFilename;
             ComputeBlockId(hashBasis);
             Length = length;
             StartOffset = startOffset;
@@ -95,11 +94,15 @@ namespace Microsoft.Azure.Samples.BlobCat
 
             var memStream = new MemoryStream(backingArray);
 
-            using (var srcFile = new FileStream(this.sourceFileName, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var srcFile = new FileStream(this.Parent, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
                 srcFile.Position = this.StartOffset;
 
+                logger.LogDebug($"Inside FileBlockRange::GetBlockRangeData; about to call ReadAsync for {this.Name}");
+
                 await srcFile.ReadAsync(backingArray, 0, (int)this.Length);
+
+                logger.LogDebug($"FileBlockRange::GetBlockRangeData: finished call to ReadAsync for {this.Name}");
 
                 var encodedChecksum = calcMD5ForBlock ? this.ComputeChecksumFromStream(memStream) : null;
 
@@ -121,6 +124,7 @@ namespace Microsoft.Azure.Samples.BlobCat
 
         internal BlobBlockRange(CloudBlockBlob inBlob, string hashBasis, long currOffset, long blockLength)
         {
+            Parent = inBlob.Name;
             sourceBlob = inBlob;
             ComputeBlockId(hashBasis);
             StartOffset = currOffset;
@@ -132,12 +136,12 @@ namespace Microsoft.Azure.Samples.BlobCat
             BlockRangeData retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
-            await BlobHelpers.GetStorageRetryPolicy($"GetBlockRangeData for source blob {this.sourceBlob.Name} corresponding to block Id {this.Name}", logger).ExecuteAsync(async () =>
+            await BlobHelpers.GetStorageRetryPolicy($"BlobBlockRange::GetBlockRangeData for source blob {this.sourceBlob.Name} corresponding to block Id {this.Name}", logger).ExecuteAsync(async () =>
             {
                 // we do not wrap this around in a 'using' block because the caller will be calling Dispose() on the memory stream
                 var memStream = new MemoryStream((int)this.Length);
 
-                logger.LogDebug($"Inside GetBlockRangeData; about to call DownloadRangeToStreamAsync for {this.Name}");
+                logger.LogDebug($"Inside BlobBlockRange::GetBlockRangeData; about to call DownloadRangeToStreamAsync for {this.Name}");
 
                 await this.sourceBlob.DownloadRangeToStreamAsync(memStream,
                     this.StartOffset,
@@ -152,7 +156,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                     },
                     null);
 
-                logger.LogDebug($"Inside GetBlockRangeData; finished DownloadRangeToStreamAsync for {this.Name}");
+                logger.LogDebug($"BlobBlockRange::GetBlockRangeData finished DownloadRangeToStreamAsync for {this.Name}");
 
                 var encodedChecksum = calcMD5ForBlock ? this.ComputeChecksumFromStream(memStream) : null;
 

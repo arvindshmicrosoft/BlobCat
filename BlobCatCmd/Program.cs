@@ -129,6 +129,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                     opts.DestEndpointSuffix,
                     opts.ColHeader,
                     opts.CalcMD5ForBlock,
+                    opts.Overwrite,
                     opts.ServerTimeout,
                     opts.MaxDOP,
                     opts.UseRetry,
