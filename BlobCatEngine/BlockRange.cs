@@ -1,15 +1,46 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using System.IO;
-using System.Security.Cryptography;
-using System.Threading.Tasks;
-using Microsoft.WindowsAzure.Storage.Blob;
-using System.Data.HashFunction.CityHash;
-using Microsoft.Extensions.Logging;
-
+﻿//------------------------------------------------------------------------------
+//<copyright company="Arvind Shyamsundar">
+//    The MIT License (MIT)
+//    
+//    Copyright (c) 2018 Arvind Shyamsundar
+//    
+//    Permission is hereby granted, free of charge, to any person obtaining a copy
+//    of this software and associated documentation files (the "Software"), to deal
+//    in the Software without restriction, including without limitation the rights
+//    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//    copies of the Software, and to permit persons to whom the Software is
+//    furnished to do so, subject to the following conditions:
+//    
+//    The above copyright notice and this permission notice shall be included in all
+//    copies or substantial portions of the Software.
+//    
+//    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//    SOFTWARE.
+//
+//    This sample code is not supported under any Microsoft standard support program or service. 
+//    The entire risk arising out of the use or performance of the sample scripts and documentation remains with you. 
+//    In no event shall Microsoft, its authors, or anyone else involved in the creation, production, or delivery of the scripts
+//    be liable for any damages whatsoever (including, without limitation, damages for loss of business profits,
+//    business interruption, loss of business information, or other pecuniary loss) arising out of the use of or inability
+//    to use the sample scripts or documentation, even if Microsoft has been advised of the possibility of such damages.
+//</copyright>
+//------------------------------------------------------------------------------
 namespace Microsoft.Azure.Samples.BlobCat
 {
+    using Microsoft.Extensions.Logging;
+    using Microsoft.WindowsAzure.Storage.Blob;
+    using System;
+    using System.Data.HashFunction.CityHash;
+    using System.IO;
+    using System.Security.Cryptography;
+    using System.Text;
+    using System.Threading.Tasks;
+
     class BlockRangeData : IDisposable
     {
         internal MemoryStream MemStream;
@@ -32,7 +63,7 @@ namespace Microsoft.Azure.Samples.BlobCat
         internal string Name;
         internal string Parent;
                 
-        internal async virtual Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, ILogger logger)
+        internal async virtual Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, bool useInbuiltRetry, int retryCount, ILogger logger)
         {
             // TODO in all derived classes we need to check for 0-length block ranges
             return null;
@@ -87,7 +118,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             StartOffset = startOffset;
         }
 
-        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, ILogger logger)
+        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, bool useInbuiltRetry, int retryCount, ILogger logger)
         {
             // TODO logging
             var backingArray = new byte[this.Length];
@@ -131,29 +162,34 @@ namespace Microsoft.Azure.Samples.BlobCat
             Length = blockLength;
         }
 
-        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, ILogger logger)
+        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, bool useInbuiltRetry, int retryCount, ILogger logger)
         {
             BlockRangeData retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
-            await BlobHelpers.GetStorageRetryPolicy($"BlobBlockRange::GetBlockRangeData for source blob {this.sourceBlob.Name} corresponding to block Id {this.Name}", logger).ExecuteAsync(async () =>
+            await BlobHelpers.GetStorageRetryPolicy($"BlobBlockRange::GetBlockRangeData for source blob {this.sourceBlob.Name} corresponding to block Id {this.Name}", retryCount, logger).ExecuteAsync(async () =>
             {
                 // we do not wrap this around in a 'using' block because the caller will be calling Dispose() on the memory stream
                 var memStream = new MemoryStream((int)this.Length);
 
                 logger.LogDebug($"Inside BlobBlockRange::GetBlockRangeData; about to call DownloadRangeToStreamAsync for {this.Name}");
 
+                var blobReqOpts = new BlobRequestOptions()
+                {
+                    ServerTimeout = TimeSpan.FromSeconds(timeoutSeconds),
+                    MaximumExecutionTime = TimeSpan.FromSeconds(timeoutSeconds)
+                };
+
+                if (!useInbuiltRetry)
+                {
+                    blobReqOpts.RetryPolicy = new WindowsAzure.Storage.RetryPolicies.NoRetry();
+                }
+
                 await this.sourceBlob.DownloadRangeToStreamAsync(memStream,
                     this.StartOffset,
                     this.Length,
                     null,
-                    new BlobRequestOptions()
-                    {
-                            // TODO should retry
-                            RetryPolicy = new WindowsAzure.Storage.RetryPolicies.NoRetry(),
-                        ServerTimeout = TimeSpan.FromSeconds(timeoutSeconds),
-                        MaximumExecutionTime = TimeSpan.FromSeconds(timeoutSeconds)
-                    },
+                    blobReqOpts,
                     null);
 
                 logger.LogDebug($"BlobBlockRange::GetBlockRangeData finished DownloadRangeToStreamAsync for {this.Name}");
@@ -184,7 +220,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             ComputeBlockId(hashBasis);
         }
 
-        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, ILogger logger)
+        internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, bool useInbuiltRetry, int retryCount, ILogger logger)
         {
             // TODO logging
 

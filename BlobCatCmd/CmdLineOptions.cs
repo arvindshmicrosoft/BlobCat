@@ -85,6 +85,9 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("ColHeader", Required = false, HelpText = "Column header string")]
         public string ColHeader { get; set; }
 
+        [Option("FileSeparator", Required = false, HelpText = "File Separator string")]
+        public string FileSeparator { get; set; }
+
         [Option("CalcMD5ForBlock", Default = false, Required = false, HelpText = "(true | false) Whether to sort the input file names")]
         public bool CalcMD5ForBlock { get; set; }
 
@@ -94,14 +97,17 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("Debug", Default = false, Required = false, HelpText = "(true | false) Include debug output")]
         public bool DebugOutput { get; set; }
 
-        [Option("ServerTimeout", Default = 120, Required = false, HelpText = "ServerTimeout in seconds")]
-        public int ServerTimeout { get; set; }
+        [Option("ExecutionTimeout", Default = 120, Required = false, HelpText = "ExecutionTimeout in seconds")]
+        public int ExecutionTimeout { get; set; }
 
         [Option("MaxDOP", Default = 8, Required = false, HelpText = "Number of parallel tasks to use for concatenation (default 8)")]
         public int MaxDOP { get; set; }
 
-        [Option("UseRetry", Default = true, Required = false, HelpText = "Set this to false to not use the Azure Storage inbuilt retry.")]
-        public bool UseRetry { get; set; }
+        [Option("UseInbuiltRetry", Default = true, Required = false, HelpText = "Set this to false to not use the Azure Storage inbuilt retry.")]
+        public bool UseInbuiltRetry { get; set; }
+
+        [Option("RetryCount", Default = 5, Required = false, HelpText = "How many times to retry blob operations")]
+        public int RetryCount { get; set; }
     }
 
     [Verb("filestoblob", HelpText = "Concatenates a set of on-disk files into a single blob.")]
@@ -140,6 +146,9 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("ColHeader", Required = false, HelpText = "Column header string")]
         public string ColHeader { get; set; }
 
+        [Option("FileSeparator", Required = false, HelpText = "File Separator string")]
+        public string FileSeparator { get; set; }
+
         [Option("CalcMD5ForBlock", Default = false, Required = false, HelpText = "(true | false) Whether to sort the input file names")]
         public bool CalcMD5ForBlock { get; set; }
 
@@ -149,13 +158,16 @@ namespace Microsoft.Azure.Samples.BlobCat
         [Option("Debug", Default = false, Required = false, HelpText = "(true | false) Include debug output")]
         public bool DebugOutput { get; set; }
 
-        [Option("ServerTimeout", Default = 120, Required = false, HelpText = "ServerTimeout in seconds")]
-        public int ServerTimeout { get; set; }
+        [Option("ExecutionTimeout", Default = 120, Required = false, HelpText = "ExecutionTimeout in seconds")]
+        public int ExecutionTimeout { get; set; }
 
         [Option("MaxDOP", Default = 8, Required = false, HelpText = "Number of parallel tasks to use for concatenation (default 8)")]
         public int MaxDOP { get; set; }
 
-        [Option("UseRetry", Default = true, Required = false, HelpText = "Set this to false to not use the Azure Storage inbuilt retry.")]
-        public bool UseRetry { get; set; }
+        [Option("UseInbuiltRetry", Default = true, Required = false, HelpText = "Set this to false to not use the Azure Storage inbuilt retry.")]
+        public bool UseInbuiltRetry { get; set; }
+
+        [Option("RetryCount", Default = 5, Required = false, HelpText = "How many times to retry blob operations")]
+        public int RetryCount { get; set; }
     }
 }

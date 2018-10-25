@@ -104,11 +104,13 @@ namespace Microsoft.Azure.Samples.BlobCat
             string destBlobName,
             string destEndpointSuffix,
             string colHeader,
+            string fileSeparator,
             bool calcMD5ForBlock,
             bool overwriteDest,
             int timeoutSeconds,
             int maxDOP,
-            bool useRetry,
+            bool useInbuiltRetry,
+            int retryCount,
             ILogger logger,
             IProgress<OpProgress> progress)
         {
@@ -127,6 +129,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                     destStorageAccountKey,
                     destEndpointSuffix,
                     overwriteDest,
+                    retryCount,
                     logger);
 
                 var destBlockList = res.blockList;
@@ -153,6 +156,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                         sourceSAS,
                         sourceStorageAccountKey,
                         sourceEndpointSuffix,
+                        retryCount,
                         logger);
 
                     // check for null being returned from above in which case we need to exit
@@ -183,9 +187,19 @@ namespace Microsoft.Azure.Samples.BlobCat
                     sourceStorageContainerName);
 
                 // it is necessary to use a dictionary to hold the BlobItem because we do want to preserve sort order if necessary
+                int tmpBlobIndex = 0;
                 foreach (var srcBlob in sourceBlobNames)
                 {
                     sourceBlockList.Add(srcBlob, new List<BlockRangeBase>());
+
+                    InjectFileSeparator(sourceBlockList,
+                        fileSeparator,
+                        tmpBlobIndex,
+                        sourceEndpointSuffix,
+                        sourceStorageAccountName,
+                        sourceStorageContainerName);
+
+                    tmpBlobIndex++;
                 }
 
                 // sourceBlobItems.AddRange(sourceBlobNames.Select(b => new BlobItem { sourceBlobName = b }));
@@ -193,24 +207,25 @@ namespace Microsoft.Azure.Samples.BlobCat
                 // get block lists for all source blobs in parallel. earlier this was done serially and was found to be bottleneck
                 Parallel.ForEach(sourceBlobNames, srcBlobName =>
                 {
-                    var tmpBlobItem = new BlobItem();
+                    // var tmpBlobItem = new BlobItem();
 
-                    tmpBlobItem.blockBlob = BlobHelpers.GetBlockBlob(sourceStorageAccountName,
+                    var tmpSrcBlob = BlobHelpers.GetBlockBlob(sourceStorageAccountName,
                         sourceStorageContainerName,
                         srcBlobName,
                         sourceSAS,
                         sourceStorageAccountKey,
                         sourceEndpointSuffix,
+                        retryCount,
                         logger);
 
-                    if (tmpBlobItem.blockBlob is null)
+                    if (tmpSrcBlob is null)
                     {
                         // throw exception. this condition will only be entered if a blob name was explicitly specified and it does not really exist
                         throw new StorageException($"An invalid source blob ({srcBlobName}) was specified.");
                     }
 
                     // first we get the block list of the source blob. we use this to later parallelize the download / copy operation
-                    tmpBlobItem.blockList = BlobHelpers.GetBlockListForBlob(tmpBlobItem.blockBlob, logger).GetAwaiter().GetResult();
+                    var tmpBlockList = BlobHelpers.GetBlockListForBlob(tmpSrcBlob, retryCount, logger).GetAwaiter().GetResult();
 
                     // proceed to construct a List<BlobBlockRange> to add to the master dictionary
 
@@ -219,13 +234,13 @@ namespace Microsoft.Azure.Samples.BlobCat
                     int chunkIndex = 0;
                     var blocksToBeAdded = new List<BlobBlockRange>();
 
-                    if (tmpBlobItem.blockList.Count() == 0 && tmpBlobItem.blockBlob.Properties.Length > 0)
+                    if (tmpBlockList.Count() == 0 && tmpSrcBlob.Properties.Length > 0)
                     {
                         // in case the source blob is smaller then 256 MB (for latest API) then the blob is stored directly without any block list
                         // so in this case the sourceBlockList is 0-length and we need to fake a BlockListItem as null, which will later be handled below
-                        var blockLength = tmpBlobItem.blockBlob.Properties.Length;
+                        var blockLength = tmpSrcBlob.Properties.Length;
 
-                        blocksToBeAdded.Add(new BlobBlockRange(tmpBlobItem.blockBlob,
+                        blocksToBeAdded.Add(new BlobBlockRange(tmpSrcBlob,
                                                     string.Concat(
                                                         sourceEndpointSuffix,
                                                         sourceStorageAccountName,
@@ -238,14 +253,13 @@ namespace Microsoft.Azure.Samples.BlobCat
                     }
                     else
                     {
-                        foreach (var blockListItem in tmpBlobItem.blockList)
+                        foreach (var blockListItem in tmpBlockList)
                         {
                             var blockLength = blockListItem.Length;
 
                             // compute a unique blockId based on blob account + container + blob name (includes path) + block length + block "number"
                             // TODO also consider a fileIndex component, to eventually allow for the same source blob to recur in the list of source blobs
-
-                            blocksToBeAdded.Add(new BlobBlockRange(tmpBlobItem.blockBlob,
+                            blocksToBeAdded.Add(new BlobBlockRange(tmpSrcBlob,
                                 string.Concat(
                                     sourceEndpointSuffix,
                                     sourceStorageAccountName,
@@ -264,8 +278,7 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                     lock (sourceBlockList)
                     {
-                        sourceBlockList[srcBlobName].AddRange(blocksToBeAdded);
-                        // TODO potentially interleave with any "line separators" between blobs
+                        sourceBlockList[srcBlobName].AddRange(blocksToBeAdded);                        
                     }
                 });
 
@@ -282,7 +295,8 @@ namespace Microsoft.Azure.Samples.BlobCat
                     calcMD5ForBlock,
                     timeoutSeconds,
                     maxDOP,
-                    useRetry,
+                    useInbuiltRetry,
+                    retryCount,
                     opProgress,
                     progress,
                     logger))
@@ -307,6 +321,31 @@ namespace Microsoft.Azure.Samples.BlobCat
             }
 
             return true;
+        }
+
+        private static void InjectFileSeparator(Dictionary<string, List<BlockRangeBase>> sourceBlockList,
+            string fileSeparator,
+            int fileIndex,
+            string sourceEndpointSuffix,
+            string sourceStorageAccountName,
+            string sourceStorageContainerName)
+        {
+            // if the user specified a file separator string to be appended after each file, 
+            // append that now as a string block range
+            if (!string.IsNullOrEmpty(fileSeparator))
+            {
+                var fileSepKey = string.Concat(fileSeparator, fileIndex);
+
+                sourceBlockList.Add(fileSepKey, new List<BlockRangeBase>());
+
+                sourceBlockList[fileSepKey].Add(new StringBlockRange(Regex.Unescape(fileSeparator),
+                        string.Concat(
+                            fileSeparator,
+                            fileIndex,
+                            sourceEndpointSuffix,
+                            sourceStorageAccountName,
+                            sourceStorageContainerName)));
+            }
         }
 
         private static void PrefixColumnHeaderIfApplicable(Dictionary<string, List<BlockRangeBase>> sourceBlockList,
@@ -361,11 +400,13 @@ namespace Microsoft.Azure.Samples.BlobCat
             string destBlobName,
             string destEndpointSuffix,
             string colHeader,
+            string fileSeparator,
             bool calcMD5ForBlock,
             bool overwriteDest,
             int timeoutSeconds,
             int maxDOP,
-            bool useRetry,
+            bool useInbuiltRetry,
+            int retryCount,
             ILogger logger,
             IProgress<OpProgress> progress
             )
@@ -385,6 +426,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                     destStorageAccountKey,
                     destEndpointSuffix,
                     overwriteDest,
+                    retryCount,
                     logger);
 
                 var destBlockList = res.blockList;
@@ -423,10 +465,21 @@ namespace Microsoft.Azure.Samples.BlobCat
                     null,
                     null);
 
+                int tmpBlobIndex = 0;
+
                 // it is necessary to use a dictionary to hold the BlobItem because we do want to preserve sort order if necessary
                 foreach (var srcBlob in sourceFileNames)
                 {
                     sourceBlockList.Add(srcBlob, new List<BlockRangeBase>());
+
+                    InjectFileSeparator(sourceBlockList,
+                        fileSeparator,
+                        tmpBlobIndex,
+                        null,
+                        null,
+                        null);
+
+                    tmpBlobIndex++;
                 }
 
                 foreach (var sourceFileName in sourceFileNames)
@@ -447,8 +500,6 @@ namespace Microsoft.Azure.Samples.BlobCat
                         ));
 
                     sourceBlockList[sourceFileName].AddRange(chunkSet);
-
-                    // TODO optionally allow user to specify extra character(s) to append in between files. This is typically needed when the source files do not have a trailing \n character.
                 }
 
                 // the total number of "ticks" to be reported will be the number of blocks + the number of blobs
@@ -464,7 +515,8 @@ namespace Microsoft.Azure.Samples.BlobCat
                     calcMD5ForBlock,
                     timeoutSeconds,
                     maxDOP,
-                    useRetry,
+                    useInbuiltRetry,
+                    retryCount,
                     opProgress,
                     progress,
                     logger))

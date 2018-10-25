@@ -1,4 +1,36 @@
-﻿
+﻿//------------------------------------------------------------------------------
+//<copyright company="Arvind Shyamsundar">
+//    The MIT License (MIT)
+//    
+//    Copyright (c) 2018 Arvind Shyamsundar
+//    
+//    Permission is hereby granted, free of charge, to any person obtaining a copy
+//    of this software and associated documentation files (the "Software"), to deal
+//    in the Software without restriction, including without limitation the rights
+//    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//    copies of the Software, and to permit persons to whom the Software is
+//    furnished to do so, subject to the following conditions:
+//    
+//    The above copyright notice and this permission notice shall be included in all
+//    copies or substantial portions of the Software.
+//    
+//    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//    SOFTWARE.
+//
+//    This sample code is not supported under any Microsoft standard support program or service. 
+//    The entire risk arising out of the use or performance of the sample scripts and documentation remains with you. 
+//    In no event shall Microsoft, its authors, or anyone else involved in the creation, production, or delivery of the scripts
+//    be liable for any damages whatsoever (including, without limitation, damages for loss of business profits,
+//    business interruption, loss of business information, or other pecuniary loss) arising out of the use of or inability
+//    to use the sample scripts or documentation, even if Microsoft has been advised of the possibility of such damages.
+//</copyright>
+//------------------------------------------------------------------------------
+
 namespace Microsoft.Azure.Samples.BlobCat
 {
     using Microsoft.Extensions.Logging;
@@ -39,12 +71,12 @@ namespace Microsoft.Azure.Samples.BlobCat
         /// Wrapper to centralize the storage retry policy definition; this is used in multiple places in the code
         /// </summary>
         /// <returns></returns>
-        internal static Polly.Retry.RetryPolicy GetStorageRetryPolicy(string execContext, ILogger logger)
+        internal static Polly.Retry.RetryPolicy GetStorageRetryPolicy(string execContext, int retryCount, ILogger logger)
         {
             return Policy.Handle<StorageException>(ex => IsStorageExceptionRetryable(ex))
                     // TODO make retry count and sleep configurable???
                     .WaitAndRetryAsync(
-                        5,
+                        retryCount,
                         retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
                         (Exception genEx, TimeSpan timeSpan, Context context) =>
                         {
@@ -84,12 +116,12 @@ namespace Microsoft.Azure.Samples.BlobCat
             return;
         }
 
-        internal async static Task<IEnumerable<ListBlockItem>> GetBlockListForBlob(CloudBlockBlob destBlob, ILogger logger)
+        internal async static Task<IEnumerable<ListBlockItem>> GetBlockListForBlob(CloudBlockBlob destBlob, int retryCount, ILogger logger)
         {
             IEnumerable<ListBlockItem> retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
-            await GetStorageRetryPolicy($"DownloadBlockListAsync for blob {destBlob.Name}", logger).ExecuteAsync(async () =>
+            await GetStorageRetryPolicy($"DownloadBlockListAsync for blob {destBlob.Name}", retryCount, logger).ExecuteAsync(async () =>
             {
                 if (!await destBlob.ExistsAsync())
                 {
@@ -121,18 +153,20 @@ namespace Microsoft.Azure.Samples.BlobCat
             string inSAS,
             string inStorageAccountKey,
             string inEndpointSuffix,
+            int retryCount,
             ILogger logger)
         {
             List<string> retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
-            await GetStorageRetryPolicy($"ListBlobsSegmentedAsync for blob prefix {inBlobPrefix}", logger).ExecuteAsync(async () =>
+            await GetStorageRetryPolicy($"ListBlobsSegmentedAsync for blob prefix {inBlobPrefix}", retryCount, logger).ExecuteAsync(async () =>
             {
                 var blobContainer = GetBlobContainerReference(inStorageAccountName,
                 inStorageContainerName,
                 inSAS,
                 inStorageAccountKey,
                 inEndpointSuffix,
+                retryCount,
                 logger);
 
                 if (blobContainer != null)
@@ -173,18 +207,20 @@ namespace Microsoft.Azure.Samples.BlobCat
             string inSAS,
             string inStorageAccountKey,
             string inEndpointSuffix,
+            int retryCount,
             ILogger logger)
         {
             CloudBlockBlob retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
-            GetStorageRetryPolicy($"GetBlockBlobReference for {inBlobName}", logger).ExecuteAsync(async () =>
+            GetStorageRetryPolicy($"GetBlockBlobReference for {inBlobName}", retryCount, logger).ExecuteAsync(async () =>
             {
                 var blobContainer = GetBlobContainerReference(inStorageAccountName,
                 inStorageContainerName,
                 inSAS,
                 inStorageAccountKey,
                 inEndpointSuffix,
+                retryCount,
                 logger);
 
                 retVal = blobContainer.GetBlockBlobReference(inBlobName);
@@ -206,12 +242,13 @@ namespace Microsoft.Azure.Samples.BlobCat
             string inSAS,
             string inStorageAccountKey,
             string inEndpointSuffix,
+            int retryCount,
             ILogger logger)
         {
             CloudBlobContainer retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
-            GetStorageRetryPolicy($"GetContainerReference for container {inStorageContainerName}", logger).ExecuteAsync(async () =>
+            GetStorageRetryPolicy($"GetContainerReference for container {inStorageContainerName}", retryCount, logger).ExecuteAsync(async () =>
             {
                 var typeOfinCredential = string.IsNullOrEmpty(inSAS) ? "AccountKey" : "SharedAccessSignature";
                 var inCredential = string.IsNullOrEmpty(inSAS) ? inStorageAccountKey : inSAS;
@@ -234,6 +271,7 @@ namespace Microsoft.Azure.Samples.BlobCat
             string destStorageAccountKey,
             string destEndpointSuffix,
             bool overwriteDest,
+            int retryCount,
             ILogger logger)
         {
             var destBlockList = new List<string>();
@@ -245,6 +283,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                 destSAS,
                 destStorageAccountKey,
                 destEndpointSuffix,
+                retryCount,
                 logger);
 
             if (destBlob is null)
@@ -255,8 +294,7 @@ namespace Microsoft.Azure.Samples.BlobCat
 
             // check if the blob exists, in which case we need to also get the list of blocks associated with that blob
             // this will help to skip blocks which were already completed, and thereby help with resume
-            // TODO Block IDs are not unique across files - this will trip up the logic
-            var blockList = await BlobHelpers.GetBlockListForBlob(destBlob, logger);
+            var blockList = await BlobHelpers.GetBlockListForBlob(destBlob, retryCount, logger);
             if (blockList is null)
             {
                 // this is when the destination blob does not yet exist

@@ -1,20 +1,44 @@
-﻿
+﻿//------------------------------------------------------------------------------
+//<copyright company="Arvind Shyamsundar">
+//    The MIT License (MIT)
+//    
+//    Copyright (c) 2018 Arvind Shyamsundar
+//    
+//    Permission is hereby granted, free of charge, to any person obtaining a copy
+//    of this software and associated documentation files (the "Software"), to deal
+//    in the Software without restriction, including without limitation the rights
+//    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//    copies of the Software, and to permit persons to whom the Software is
+//    furnished to do so, subject to the following conditions:
+//    
+//    The above copyright notice and this permission notice shall be included in all
+//    copies or substantial portions of the Software.
+//    
+//    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//    SOFTWARE.
+//
+//    This sample code is not supported under any Microsoft standard support program or service. 
+//    The entire risk arising out of the use or performance of the sample scripts and documentation remains with you. 
+//    In no event shall Microsoft, its authors, or anyone else involved in the creation, production, or delivery of the scripts
+//    be liable for any damages whatsoever (including, without limitation, damages for loss of business profits,
+//    business interruption, loss of business information, or other pecuniary loss) arising out of the use of or inability
+//    to use the sample scripts or documentation, even if Microsoft has been advised of the possibility of such damages.
+//</copyright>
+//------------------------------------------------------------------------------
+
 namespace Microsoft.Azure.Samples.BlobCat
 {
-    using System;
-    using System.Collections.Generic;
-    using System.Text;
     using Microsoft.Extensions.Logging;
-    using WindowsAzure.Storage;
     using Microsoft.WindowsAzure.Storage.Blob;
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
-    using System.IO;
     using System.Linq;
-    using System.Net;
-    using System.Text.RegularExpressions;
-    using System.Threading;
     using System.Threading.Tasks;
     using System.Threading.Tasks.Dataflow;
 
@@ -27,7 +51,8 @@ namespace Microsoft.Azure.Samples.BlobCat
             bool calcMD5ForBlock,
             int timeoutSeconds,
             int maxDOP,
-            bool useRetry,
+            bool useInbuiltRetry,
+            int retryCount,
             OpProgress opProgress,
             IProgress<OpProgress> progress,
             ILogger logger)
@@ -81,7 +106,8 @@ namespace Microsoft.Azure.Samples.BlobCat
                         opProgress,
                         timeoutSeconds,
                         maxDOP,
-                        useRetry);
+                        useInbuiltRetry,
+                        retryCount);
 
                     if (!processBRStatus)
                     {
@@ -92,7 +118,7 @@ namespace Microsoft.Azure.Samples.BlobCat
                     // each iteration (each source item) we will commit an ever-increasing super-set of block IDs
                     // we do this to support "resume" operations later on.
                     // we will only do this if we actually did any work here TODO review
-                    await BlobHelpers.GetStorageRetryPolicy($"PutBlockListAsync for blob {currBlobItem}", logger).ExecuteAsync(async () =>
+                    await BlobHelpers.GetStorageRetryPolicy($"PutBlockListAsync for blob {currBlobItem}", retryCount, logger).ExecuteAsync(async () =>
                     {
                         await destBlob.PutBlockListAsync(finalBlockList);
                     });
@@ -120,10 +146,9 @@ namespace Microsoft.Azure.Samples.BlobCat
             OpProgress progressDetails,
             int timeoutSeconds,
             int maxDOP,
-            bool useRetry)
+            bool useInbuiltRetry,
+            int retryCount)
         {
-            // int blockRangesDone = 0;
-
             bool allOK = true;
 
             var actionBlock = new ActionBlock<BlockRangeBase>(
@@ -134,7 +159,13 @@ namespace Microsoft.Azure.Samples.BlobCat
                 {
                     logger.LogDebug($"Inside the action block, before calling ProcessBlockRange for {br.Name}");
 
-                    var brStatus = await ProcessBlockRange(br, destBlob, timeoutSeconds, useRetry, calcMD5ForBlock, logger);
+                    var brStatus = await ProcessBlockRange(br,
+                        destBlob,
+                        timeoutSeconds,
+                        useInbuiltRetry,
+                        retryCount,
+                        calcMD5ForBlock,
+                        logger);
 
                     if (!brStatus)
                     {
@@ -143,11 +174,8 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                     logger.LogDebug($"Inside the action block, after calling ProcessBlockRange for {br.Name} with retval {brStatus}");
 
-                    // TODO if brStatus is false, most likely the inner exceptions would have already been thrown but perhaps be defensive and we have to exit somehow because this means something went wrong.
-
                     progress.Report(progressDetails);
                 }
-                // TODO see if there is a better way
                 catch (Exception ex)
                 {
                     logger.LogError(ex, $"Could not process range with block ID {br.Name}");
@@ -157,7 +185,6 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                 sw.Stop();
 
-                // TODO fix the logging to be fully relevant
                 logger.LogDebug("{eventType} {duration} {context}", "ProcessBlockRanges", sw.Elapsed, $"ProcessBlockRange {br.Name} ended.");
             },
             new ExecutionDataflowBlockOptions()
@@ -184,7 +211,6 @@ namespace Microsoft.Azure.Samples.BlobCat
 
             logger.LogDebug($"Dataflow action block completed.");
 
-            // TODO how to check the inner bool retVal and surface it here
             return allOK;
         }
 
@@ -200,13 +226,18 @@ namespace Microsoft.Azure.Samples.BlobCat
             BlockRangeBase currRange,
             CloudBlockBlob destBlob,
             int timeoutSeconds,
-            bool useRetry,
+            bool useInbuiltRetry,
+            int retryCount,
             bool calcMD5ForBlock,
             ILogger logger)
         {
             logger.LogDebug($"Started ProcessBlockRange for {currRange.Name}");
 
-            using (var brData = await currRange.GetBlockRangeData(calcMD5ForBlock, timeoutSeconds, logger))
+            using (var brData = await currRange.GetBlockRangeData(calcMD5ForBlock,
+                timeoutSeconds,
+                useInbuiltRetry,
+                retryCount,
+                logger))
             {
                 var brDataIsNull = (brData is null) ? "null" : "valid";
 
@@ -222,19 +253,19 @@ namespace Microsoft.Azure.Samples.BlobCat
                 logger.LogDebug($"Inside ProcessBlockRange, about to start the PutBlockAsync action for {currRange.Name}");
 
                 // use retry policy which will automatically handle the throttling related StorageExceptions
-                await BlobHelpers.GetStorageRetryPolicy($"PutBlockAsync for block {currRange.Name}", logger).ExecuteAsync(async () =>
+                await BlobHelpers.GetStorageRetryPolicy($"PutBlockAsync for block {currRange.Name}", retryCount, logger).ExecuteAsync(async () =>
                 {
                     logger.LogDebug($"Before PutBlockAsync for {currRange.Name}");
 
                     var blobReqOpts = new BlobRequestOptions()
                     {
-                        // TODO should retry
-                        RetryPolicy = new WindowsAzure.Storage.RetryPolicies.NoRetry(),
-                        ServerTimeout = TimeSpan.FromSeconds(timeoutSeconds),
                         MaximumExecutionTime = TimeSpan.FromSeconds(timeoutSeconds)
                     };
 
-                    if (!useRetry) blobReqOpts.RetryPolicy = new WindowsAzure.Storage.RetryPolicies.NoRetry();
+                    if (!useInbuiltRetry)
+                    {
+                        blobReqOpts.RetryPolicy = new WindowsAzure.Storage.RetryPolicies.NoRetry();
+                    }
 
                     // reset the memory stream again to 0
                     brData.MemStream.Position = 0;
