@@ -50,99 +50,97 @@ namespace Microsoft.Azure.Samples.BlobCat
         /// </summary>
         static int Main(string[] args)
         {
+            int retVal = 0;
+
             // create a logger instance
             var logFilePath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
                 "log_{Date}.txt");
 
-            var loggerFactory = new LoggerFactory().AddFile(logFilePath, args.Contains("--Debug") ? LogLevel.Debug : LogLevel.Information);
-
-            var myLogger = loggerFactory.CreateLogger("BlobCatCmd");
-
-            var parseResult = Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args);
-
             ProgressBar pbar = null;
 
-            // check for Console.IsInputRedirected || Console.IsOutputRedirected and if so then do not use progressbar
-            var progress = new Progress<OpProgress>(opProgress =>
+            using (pbar)
             {
-                if (pbar is null)
+                using (var loggerFactory = new LoggerFactory().AddFile(logFilePath, args.Contains("--Debug") ? LogLevel.Debug : LogLevel.Information))
                 {
-                    if (opProgress.TotalTicks > 0)
+                    var myLogger = loggerFactory.CreateLogger("BlobCatCmd");
+
+                    var parseResult = Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args);
+
+                    // TODO check for Console.IsInputRedirected || Console.IsOutputRedirected and if so then do not use progressbar
+                    var progress = new Progress<OpProgress>(opProgress =>
                     {
-                        pbar = new ProgressBar(opProgress.TotalTicks, "Starting operation", new ProgressBarOptions
+                        if (pbar is null)
                         {
-                            ProgressCharacter = '.',
-                            ProgressBarOnBottom = true,
-                            EnableTaskBarProgress = true,
-                            DisplayTimeInRealTime = false
-                        });
-                    }
+                            if (opProgress.TotalTicks > 0)
+                            {
+                                pbar = new ProgressBar(opProgress.TotalTicks, "Starting operation", new ProgressBarOptions
+                                {
+                                    ProgressCharacter = '.',
+                                    ProgressBarOnBottom = true,
+                                    // EnableTaskBarProgress = true,
+                                    DisplayTimeInRealTime = true
+                                });
+                            }
+                        }
+
+                        if (pbar != null)
+                        {
+                            pbar.Tick(opProgress.StatusMessage);
+                        }
+                    });
+
+                    retVal = parseResult.MapResult(
+                    (ConcatBlobOptions opts) =>
+                    {
+                        return BlobCatEngine.BlobToBlob(
+                            opts.SourceAccountName,
+                            opts.SourceContainer,
+                            opts.SourceKey,
+                            opts.SourceSAS,
+                            opts.SourceFilePrefix,
+                            opts.SourceEndpointSuffix,
+                            opts.SortFilenames,
+                            opts.SourceFiles.ToList(),
+                            opts.DestAccountName,
+                            opts.DestKey,
+                            opts.DestSAS,
+                            opts.DestContainer,
+                            opts.DestFilename,
+                            opts.DestEndpointSuffix,
+                            opts.ColHeader,
+                            opts.CalcMD5ForBlock,
+                            opts.Overwrite,
+                            opts.ServerTimeout,
+                            opts.MaxDOP,
+                            opts.UseRetry,
+                            myLogger,
+                            progress).GetAwaiter().GetResult() ? 0 : 1;
+                    },
+                    (FilesToBlobOptions opts) =>
+                    {
+                        return BlobCatEngine.DiskToBlob(
+                            opts.SourceFolder,
+                            opts.SourceFilePrefix,
+                            opts.SortFilenames,
+                            opts.SourceFiles.ToList(),
+                            opts.DestAccountName,
+                            opts.DestKey,
+                            opts.DestSAS,
+                            opts.DestContainer,
+                            opts.DestFilename,
+                            opts.DestEndpointSuffix,
+                            opts.ColHeader,
+                            opts.CalcMD5ForBlock,
+                            opts.Overwrite,
+                            opts.ServerTimeout,
+                            opts.MaxDOP,
+                            opts.UseRetry,
+                            myLogger,
+                            progress
+                            ).GetAwaiter().GetResult() ? 0 : 1;
+                    },
+                    errs => 1);
                 }
-
-                // Console.WriteLine(percent);
-                if (pbar != null)
-                {
-                    pbar.Tick(opProgress.StatusMessage);
-                }
-                //myLogger.LogInformation($"Operation {opProgress.Percent}% complete; currently working on file {opProgress.StatusMessage}");
-            });
-
-            var retVal = parseResult.MapResult(
-            (ConcatBlobOptions opts) =>
-            {
-                return BlobCatEngine.BlobToBlob(
-                    opts.SourceAccountName,
-                    opts.SourceContainer,
-                    opts.SourceKey,
-                    opts.SourceSAS,
-                    opts.SourceFilePrefix,
-                    opts.SourceEndpointSuffix,
-                    opts.SortFilenames,
-                    opts.SourceFiles.ToList(),
-                    opts.DestAccountName,
-                    opts.DestKey,
-                    opts.DestSAS,
-                    opts.DestContainer,
-                    opts.DestFilename,
-                    opts.DestEndpointSuffix,
-                    opts.ColHeader,
-                    opts.CalcMD5ForBlock,
-                    opts.Overwrite,
-                    opts.ServerTimeout,
-                    opts.MaxDOP,
-                    opts.UseRetry,
-                    myLogger,
-                    progress).GetAwaiter().GetResult() ? 0 : 1;
-            },
-            (FilesToBlobOptions opts) =>
-            {
-                return BlobCatEngine.DiskToBlob(
-                    opts.SourceFolder,
-                    opts.SourceFilePrefix,
-                    opts.SortFilenames,
-                    opts.SourceFiles.ToList(),
-                    opts.DestAccountName,
-                    opts.DestKey,
-                    opts.DestSAS,
-                    opts.DestContainer,
-                    opts.DestFilename,
-                    opts.DestEndpointSuffix,
-                    opts.ColHeader,
-                    opts.CalcMD5ForBlock,
-                    opts.Overwrite,
-                    opts.ServerTimeout,
-                    opts.MaxDOP,
-                    opts.UseRetry,
-                    myLogger,
-                    progress
-                    ).GetAwaiter().GetResult() ? 0 : 1;
-            },
-            errs => 1);
-
-            if (retVal != 0)
-            {
-                // allow some time for logs to flush
-                System.Threading.Thread.Sleep(TimeSpan.FromSeconds(10));
             }
 
             return retVal;

@@ -226,5 +226,64 @@ namespace Microsoft.Azure.Samples.BlobCat
 
             return retVal;
         }
+
+        internal static async Task<(List<string> blockList, CloudBlockBlob destBlob)> GetDestinationBlobBlockList(string destStorageAccountName,
+            string destStorageContainerName,
+            string destBlobName,
+            string destSAS,
+            string destStorageAccountKey,
+            string destEndpointSuffix,
+            bool overwriteDest,
+            ILogger logger)
+        {
+            var destBlockList = new List<string>();
+
+            // get a reference to the destination blob
+            var destBlob = BlobHelpers.GetBlockBlob(destStorageAccountName,
+                destStorageContainerName,
+                destBlobName,
+                destSAS,
+                destStorageAccountKey,
+                destEndpointSuffix,
+                logger);
+
+            if (destBlob is null)
+            {
+                logger.LogError($"Failed to get a reference to destination conatiner / blob {destBlobName}; exiting!");
+                return (destBlockList, destBlob);
+            }
+
+            // check if the blob exists, in which case we need to also get the list of blocks associated with that blob
+            // this will help to skip blocks which were already completed, and thereby help with resume
+            // TODO Block IDs are not unique across files - this will trip up the logic
+            var blockList = await BlobHelpers.GetBlockListForBlob(destBlob, logger);
+            if (blockList is null)
+            {
+                // this is when the destination blob does not yet exist
+                logger.LogDebug($"Destination blob {destBlobName} does not exist (block listing returned null).");
+            }
+            else
+            {
+                // support overwrite by deleting the destination blob
+                if (overwriteDest)
+                {
+                    logger.LogDebug($"Destination blob {destBlobName} exists but needs to be deleted as overwrite == true.");
+
+                    await destBlob.DeleteAsync();
+
+                    logger.LogDebug($"Destination blob {destBlobName} deleted to prepare for overwrite.");
+                }
+                else
+                {
+                    logger.LogDebug($"Destination blob {destBlobName} exists; trying to get block listing.");
+
+                    destBlockList = new List<string>(blockList.Select(b => b.Name));
+
+                    logger.LogDebug($"Destination blob {destBlobName} has {destBlockList.Count} blocks.");
+                }
+            }
+
+            return (destBlockList, destBlob);
+        }
     }
 }
