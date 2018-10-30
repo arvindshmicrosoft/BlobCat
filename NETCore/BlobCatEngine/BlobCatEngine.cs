@@ -205,9 +205,10 @@ namespace Microsoft.Azure.Samples.BlobCat
                 // sourceBlobItems.AddRange(sourceBlobNames.Select(b => new BlobItem { sourceBlobName = b }));
 
                 // get block lists for all source blobs in parallel. earlier this was done serially and was found to be bottleneck
+                tmpBlobIndex = 0;
                 Parallel.ForEach(sourceBlobNames, srcBlobName =>
                 {
-                    // var tmpBlobItem = new BlobItem();
+                    Interlocked.Increment(ref tmpBlobIndex);
 
                     var tmpSrcBlob = BlobHelpers.GetBlockBlob(sourceStorageAccountName,
                         sourceStorageContainerName,
@@ -242,6 +243,7 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                         blocksToBeAdded.Add(new BlobBlockRange(tmpSrcBlob,
                                                     string.Concat(
+                                                        tmpBlobIndex,
                                                         sourceEndpointSuffix,
                                                         sourceStorageAccountName,
                                                         sourceStorageContainerName,
@@ -258,9 +260,10 @@ namespace Microsoft.Azure.Samples.BlobCat
                             var blockLength = blockListItem.Length;
 
                             // compute a unique blockId based on blob account + container + blob name (includes path) + block length + block "number"
-                            // TODO also consider a fileIndex component, to eventually allow for the same source blob to recur in the list of source blobs
+                            // We also add a fileIndex component (tmpBlockIndex), to allow for the same source blob to recur in the list of source blobs
                             blocksToBeAdded.Add(new BlobBlockRange(tmpSrcBlob,
                                 string.Concat(
+                                    tmpBlobIndex,
                                     sourceEndpointSuffix,
                                     sourceStorageAccountName,
                                     sourceStorageContainerName,
@@ -465,21 +468,21 @@ namespace Microsoft.Azure.Samples.BlobCat
                     null,
                     null);
 
-                int tmpBlobIndex = 0;
+                int tmpFileIndex = 0;
 
                 // it is necessary to use a dictionary to hold the BlobItem because we do want to preserve sort order if necessary
-                foreach (var srcBlob in sourceFileNames)
+                foreach (var srcFile in sourceFileNames)
                 {
-                    sourceBlockList.Add(srcBlob, new List<BlockRangeBase>());
+                    sourceBlockList.Add(srcFile, new List<BlockRangeBase>());
 
                     InjectFileSeparator(sourceBlockList,
                         fileSeparator,
-                        tmpBlobIndex,
+                        tmpFileIndex,
                         null,
                         null,
                         null);
 
-                    tmpBlobIndex++;
+                    tmpFileIndex++;
                 }
 
                 foreach (var sourceFileName in sourceFileNames)

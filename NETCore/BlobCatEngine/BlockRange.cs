@@ -56,14 +56,19 @@ namespace Microsoft.Azure.Samples.BlobCat
         }
     }
 
+    /// <summary>
+    /// Base class from which the different types of "ranges" are derived: blob, file and string
+    /// </summary>
     class BlockRangeBase
     {
         internal long StartOffset;
         internal long Length;
         internal string Name;
         internal string Parent;
-                
+
+#pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
         internal async virtual Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, bool useInbuiltRetry, int retryCount, ILogger logger)
+#pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously
         {
             // TODO in all derived classes we need to check for 0-length block ranges
             return null;
@@ -93,21 +98,12 @@ namespace Microsoft.Azure.Samples.BlobCat
 
             var hasher = CityHashFactory.Instance.Create(config);
             this.Name = hasher.ComputeHash(Encoding.UTF8.GetBytes(basis)).AsBase64String();
-
-            //var config = new FNVConfig()
-            //{
-            //    HashSizeInBits = 384,
-            //    Prime = 1239081328,
-            //    Offset = 123123213
-            //};
-
-            //var hasher = FNV1aFactory.Instance.Create(config);
-            //this.Name = hasher.ComputeHash(Encoding.UTF8.GetBytes(basis)).AsBase64String();
-
-            // this.Name = Convert.ToBase64String(hasher.ComputeHash(Encoding.UTF8.GetBytes(basis)));
         }
     }
 
+    /// <summary>
+    /// Represents a file "range" stream
+    /// </summary>
     class FileBlockRange : BlockRangeBase
     {
         internal FileBlockRange(string inFilename, string hashBasis, long startOffset, long length)
@@ -118,9 +114,17 @@ namespace Microsoft.Azure.Samples.BlobCat
             StartOffset = startOffset;
         }
 
+        /// <summary>
+        /// Gets a stream object which represents the "block" for the current file
+        /// </summary>
+        /// <param name="calcMD5ForBlock"></param>
+        /// <param name="timeoutSeconds"></param>
+        /// <param name="useInbuiltRetry"></param>
+        /// <param name="retryCount"></param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
         internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, bool useInbuiltRetry, int retryCount, ILogger logger)
         {
-            // TODO logging
             var backingArray = new byte[this.Length];
 
             var memStream = new MemoryStream(backingArray);
@@ -149,6 +153,9 @@ namespace Microsoft.Azure.Samples.BlobCat
         }
     }
 
+    /// <summary>
+    /// Represents a Blob "range" stream
+    /// </summary>
     class BlobBlockRange : BlockRangeBase
     {
         private CloudBlockBlob sourceBlob;
@@ -210,6 +217,9 @@ namespace Microsoft.Azure.Samples.BlobCat
         }
     }
 
+    /// <summary>
+    /// Represents a string "range" stream
+    /// </summary>
     class StringBlockRange : BlockRangeBase
     {
         private string literalValue;
@@ -220,10 +230,10 @@ namespace Microsoft.Azure.Samples.BlobCat
             ComputeBlockId(hashBasis);
         }
 
+#pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
         internal async override Task<BlockRangeData> GetBlockRangeData(bool calcMD5ForBlock, int timeoutSeconds, bool useInbuiltRetry, int retryCount, ILogger logger)
+#pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously
         {
-            // TODO logging
-
             // we do not wrap this around in a 'using' block because the caller will be calling Dispose() on the memory stream
             var memStream = new MemoryStream(Encoding.UTF8.GetBytes(this.literalValue));
 

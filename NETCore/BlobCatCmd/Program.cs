@@ -64,20 +64,22 @@ namespace Microsoft.Azure.Samples.BlobCat
 
                 var parseResult = Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args);
 
-                // TODO check for Console.IsInputRedirected || Console.IsOutputRedirected and if so then do not use progressbar
                 var progress = new Progress<OpProgress>(opProgress =>
                 {
                     if (pbar is null)
                     {
                         if (opProgress.TotalTicks > 0)
                         {
-                            pbar = new ProgressBar(opProgress.TotalTicks, "Starting operation", new ProgressBarOptions
+                            if (!(Console.IsInputRedirected || Console.IsOutputRedirected))
                             {
-                                ProgressCharacter = '.',
-                                ProgressBarOnBottom = true,
+                                pbar = new ProgressBar(opProgress.TotalTicks, "Starting operation", new ProgressBarOptions
+                                {
+                                    ProgressCharacter = '.',
+                                    ProgressBarOnBottom = true,
                                     // EnableTaskBarProgress = true,
                                     DisplayTimeInRealTime = true
-                            });
+                                });
+                            }
                         }
                     }
 

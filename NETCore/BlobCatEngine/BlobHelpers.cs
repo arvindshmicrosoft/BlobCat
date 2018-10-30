@@ -74,7 +74,6 @@ namespace Microsoft.Azure.Samples.BlobCat
         internal static Polly.Retry.RetryPolicy GetStorageRetryPolicy(string execContext, int retryCount, ILogger logger)
         {
             return Policy.Handle<StorageException>(ex => IsStorageExceptionRetryable(ex))
-                    // TODO make retry count and sleep configurable???
                     .WaitAndRetryAsync(
                         retryCount,
                         retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
@@ -213,7 +212,9 @@ namespace Microsoft.Azure.Samples.BlobCat
             CloudBlockBlob retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
+#pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
             GetStorageRetryPolicy($"GetBlockBlobReference for {inBlobName}", retryCount, logger).ExecuteAsync(async () =>
+#pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously
             {
                 var blobContainer = GetBlobContainerReference(inStorageAccountName,
                 inStorageContainerName,
@@ -248,7 +249,9 @@ namespace Microsoft.Azure.Samples.BlobCat
             CloudBlobContainer retVal = null;
 
             // use retry policy which will automatically handle the throttling related StorageExceptions
+#pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
             GetStorageRetryPolicy($"GetContainerReference for container {inStorageContainerName}", retryCount, logger).ExecuteAsync(async () =>
+#pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously
             {
                 var typeOfinCredential = string.IsNullOrEmpty(inSAS) ? "AccountKey" : "SharedAccessSignature";
                 var inCredential = string.IsNullOrEmpty(inSAS) ? inStorageAccountKey : inSAS;
