@@ -12,3 +12,13 @@
 /BlobCatCmd/BlobCatCmd.csproj.user
 /BlobCatCmd/Properties/PublishProfiles
 /BlobCatEngine/bin/Release/netstandard2.0
+/NETCore/BlobCatCmd/bin
+/NETCore/BlobCatCmd/obj
+/NETCore/BlobCatCmd/BlobCatCmd.csproj.user
+/NETCore/BlobCatEngine/bin
+/NETCore/BlobCatEngine/obj
+/NETFull/BlobCatCmd/bin/Debug
+/NETFull/BlobCatCmd/obj/Debug
+/NETFull/BlobCatEngine/bin/Debug
+/NETFull/BlobCatEngine/obj/Debug
+/NETCore/BlobCatCmd/Properties/PublishProfiles/FolderProfile.pubxml.user

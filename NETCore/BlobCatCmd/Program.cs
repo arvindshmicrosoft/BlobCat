@@ -35,6 +35,11 @@ namespace Microsoft.Azure.Samples.BlobCat
 {
     using CommandLine;
     using System.Linq;
+    using Microsoft.Extensions.Logging;
+    using System;
+    using ShellProgressBar;
+    using System.Reflection;
+    using System.IO;
 
     class Program
     {
@@ -45,15 +50,55 @@ namespace Microsoft.Azure.Samples.BlobCat
         /// </summary>
         static int Main(string[] args)
         {
-            var parseResult = CommandLine.Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args)
-                .MapResult(
-                (ConcatBlobOptions opts) => {
-                return BlobCatEngine.BlobToBlob(
-                    opts.SourceAccountName,
-                    opts.SourceContainer,
-                    opts.SourceKey,
-                    opts.SourceSAS,
+            int retVal = 0;
+
+            // create a logger instance
+            var logFilePath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
+                "log_{Date}.txt");
+
+            ProgressBar pbar = null;
+
+            using (var loggerFactory = new LoggerFactory().AddFile(logFilePath, args.Contains("--Debug") ? LogLevel.Debug : LogLevel.Information))
+            {
+                var myLogger = loggerFactory.CreateLogger("BlobCatCmd");
+
+                var parseResult = Parser.Default.ParseArguments<ConcatBlobOptions, FilesToBlobOptions>(args);
+
+                var progress = new Progress<OpProgress>(opProgress =>
+                {
+                    if (pbar is null)
+                    {
+                        if (opProgress.TotalTicks > 0)
+                        {
+                            if (!(Console.IsInputRedirected || Console.IsOutputRedirected))
+                            {
+                                pbar = new ProgressBar(opProgress.TotalTicks, "Starting operation", new ProgressBarOptions
+                                {
+                                    ProgressCharacter = '.',
+                                    ProgressBarOnBottom = true,
+                                    // EnableTaskBarProgress = true,
+                                    DisplayTimeInRealTime = true
+                                });
+                            }
+                        }
+                    }
+
+                    if (pbar != null)
+                    {
+                        pbar.Tick(opProgress.StatusMessage);
+                    }
+                });
+
+                retVal = parseResult.MapResult(
+                (ConcatBlobOptions opts) =>
+                {
+                    return BlobCatEngine.BlobToBlob(
+                        opts.SourceAccountName,
+                        opts.SourceContainer,
+                        opts.SourceKey,
+                        opts.SourceSAS,
                         opts.SourceFilePrefix,
+                        opts.SourceEndpointSuffix,
                         opts.SortFilenames,
                         opts.SourceFiles.ToList(),
                         opts.DestAccountName,
@@ -61,9 +106,19 @@ namespace Microsoft.Azure.Samples.BlobCat
                         opts.DestSAS,
                         opts.DestContainer,
                         opts.DestFilename,
-                        opts.ColHeader) ? 0 : 1;
+                        opts.DestEndpointSuffix,
+                        opts.ColHeader,
+                        opts.FileSeparator,
+                        opts.CalcMD5ForBlock,
+                        opts.Overwrite,
+                        opts.ExecutionTimeout,
+                        opts.MaxDOP,
+                        opts.UseInbuiltRetry,
+                        opts.RetryCount,
+                        myLogger,
+                        progress).GetAwaiter().GetResult() ? 0 : 1;
                 },
-                (FilesToBlobOptions opts) => 
+                (FilesToBlobOptions opts) =>
                 {
                     return BlobCatEngine.DiskToBlob(
                         opts.SourceFolder,
@@ -75,12 +130,28 @@ namespace Microsoft.Azure.Samples.BlobCat
                         opts.DestSAS,
                         opts.DestContainer,
                         opts.DestFilename,
-                        opts.ColHeader
-                        ) ? 0 : 1;
+                        opts.DestEndpointSuffix,
+                        opts.ColHeader,
+                        opts.FileSeparator,
+                        opts.CalcMD5ForBlock,
+                        opts.Overwrite,
+                        opts.ExecutionTimeout,
+                        opts.MaxDOP,
+                        opts.UseInbuiltRetry,
+                        opts.RetryCount,
+                        myLogger,
+                        progress
+                        ).GetAwaiter().GetResult() ? 0 : 1;
                 },
                 errs => 1);
+            }
 
-            return parseResult;
+            if (pbar != null)
+            {
+                pbar.Dispose();
+            }
+
+            return retVal;
         }
     }    
 }
